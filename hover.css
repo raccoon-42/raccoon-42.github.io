@@ -1,0 +1,42 @@
+:root {
+    --effect:linear(0, 1 44.7%, 0.898 51.8%, 0.874 55.1%, 0.866 58.4%, 0.888 64.3%, 1 77.4%, 0.98 84.5%, 1)
+  }
+  
+  .fancy-hover {
+      --arc: 5deg;
+      @media (hover)  {
+          &:has(li:nth-child(1):hover) {--target: 1}
+          &:has(li:nth-child(2):hover) {--target: 2}
+          &:has(li:nth-child(3):hover) {--target: 3}
+          &:has(li:nth-child(4):hover) {--target: 4}
+          &:has(li:nth-child(5):hover) {--target: 5}
+          &:has(li:nth-child(6):hover) {--target: 6}
+          &:has(li:nth-child(7):hover) {--target: 7}
+          &:has(li:nth-child(8):hover) {--target: 8}
+          &:has(li:nth-child(9):hover) {--target: 9}
+  
+      & > * {
+          transform-origin: -150% 50%;
+          transition: transform 2s var(--effect), opacity 0.3s linear;
+      }
+  
+      &:hover > li:not(:hover) {
+          --distance-from-target: abs(var(--sibling-index) - var(--target));
+          --distance-multiplier: var(--distance-from-target) * 15%; /* change 15% */
+          --gradual-fadeout: calc(100% - var(--distance-multiplier));
+          opacity: var(--gradual-fadeout);
+    
+          --angle: calc((var(--sibling-index) - var(--target)) * var(--arc));
+          transform: rotateZ(var(--angle));
+      }
+    }
+  }
+  
+  .container {
+    font-size: 1rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 70vh;
+    flex-direction: column;
+  }

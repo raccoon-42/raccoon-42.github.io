@@ -1,0 +1,27 @@
+:root {
+    --effect:linear(0, 1 44.7%, 0.898 51.8%, 0.874 55.1%, 0.866 58.4%, 0.888 64.3%, 1 77.4%, 0.98 84.5%, 1)
+  }
+  
+  .fancy-hover {
+      @media (hover)  {
+        & > * {
+          transform-origin: left center;
+          transition: transform 1s var(--effect), opacity 0.3s linear;
+      }
+  
+      &:hover > li:not(:hover) {
+         opacity: 0.25;
+         transform: scale(0.8);
+      }
+    }
+  }
+  
+.container {
+    font-size: 1rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 70vh;
+    flex-direction: column;
+  }
+  

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Portfolio</title>
+    <link rel="stylesheet" href="style.css"></link>
+    <link rel="stylesheet" href="hover.css" />
+</head>
+<body class="page index">
+    <nav>
+        <ul>
+            <li><a href="#">Home</a></li>
+            <li><a href="#">Drawings</a></li>
+            <li><a href="#">Projects</a></li>
+            <li><a href="#">Contact</a></li>    
+            <li class="pull"><button id="theme-toggle" class="change-color-theme" title="Toggle Theme">🌞</button></li>
+        </ul>
+    </nav>
+
+    <header>
+        <div class="header-inner">
+            <div class="content">
+                <h1 class="has-subtitle">
+                    <span>CodeSpace</span>
+                    <small>by Ali</small>
+                </h1>
+                <p class="tagline">A personal portfolio website, and other possible quirks.</p>
+            </div>
+            
+
+        </div>
+    </header>
+    
+
+    <div class="container" >
+        <h2 id="projects">
+            <span>Projects</span>
+        </h2>
+        <ul class="fancy-hover">
+            <li style="--sibling-index: 1;">RAG Student Affairs Chatbot</li>
+            <li style="--sibling-index: 2;">Agentic AI: MHRS Scheduler</li>
+            <li style="--sibling-index: 3;">Evolutionary Melody Generator</li>
+
+        </ul>
+    </div>
+
+    <footer>
+        <div class="footer-inner">
+            <figure>
+                <img src="img/profile.jpg" alt="Author">
+            </figure>
+            
+
+            <div class="footer-content">
+                <p>© 2025 CodeSpace. All rights reserved.</p>
+                <ul class="social">
+                    <li>
+                        <a href="https://github.com/raccoon-42">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <title>GitHub</title>
+                                <use href="img/icons/github.svg#icon">
+                                    
+                                </use>
+                            </svg>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </footer>
+    <script src="script.js"></script>
+</body>
+</html>
