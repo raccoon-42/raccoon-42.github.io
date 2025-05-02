@@ -98,6 +98,7 @@ nav {
 nav ul {
     width: 100%;
     font-family: "Helvetica Neue", sans-serif;
+    font-size: .75em;
     list-style-type: none;
     padding-left: 0;
     display: flex;
@@ -239,6 +240,7 @@ img {
     vertical-align: top;
 }
 
+
 .footer-content {
     font-size: .75em;
     color: var(--color-fg-subtle);
@@ -246,16 +248,50 @@ img {
     --vertical-margin: 1rem;
 }
 
+footer {
+    max-width: 45rem;
+    margin: 5em auto;
+    padding: 0 .5em;
+}
+
+footer ul {
+    list-style-type: none;
+    padding-left: 0;
+    display: flex;
+    justify-content: center;
+}
+
+footer li {
+    padding: 0 1em;
+}
+
+footer a, footer a:visited {
+    color: var(--color-fg-muted);
+}
+
+social svg {
+    vertical-align: middle;
+    transition: fill 100ms;
+    fill: var(--color-fg-muted);
+}
+
 nav a, nav a:visited {
     color: var(--color-fg-muted);
     text-decoration: none
   }
 
-a p  {
-
+a p {
     color: var(--color-accent-fg);
     text-decoration: none;
     background-color: transparent;
+}
+
+li a,
+li a:visited,
+li a:active,
+li a:hover {
+  color: inherit;           /* or a fixed color like #fff */
+  text-decoration: none;    /* removes underline */
 }
 
 .change-color-theme {
