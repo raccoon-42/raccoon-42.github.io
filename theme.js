@@ -12,6 +12,7 @@ if (savedTheme === 'dark') {
 }
 
 toggleBtn.addEventListener('click', () => {
+  toggleBtn.innerHTML = toggleBtn.innerHTML === '🌙' ? '☀️' : '🌙';
   const isDark = root.classList.toggle('dark-theme');
   localStorage.setItem('theme', isDark ? 'dark' : 'light');
 });

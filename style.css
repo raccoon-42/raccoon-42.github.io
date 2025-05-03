@@ -269,11 +269,13 @@ footer a, footer a:visited {
     color: var(--color-fg-muted);
 }
 
-social svg {
+.social svg {
     vertical-align: middle;
     transition: fill 100ms;
     fill: var(--color-fg-muted);
 }
+
+
 
 nav a, nav a:visited {
     color: var(--color-fg-muted);
