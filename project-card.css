@@ -1,0 +1,92 @@
+:root {
+    --color-accent-emphasis: #0969da;
+    --color-accent-fg: #0969da;
+    --color-accent-muted: rgba(84,174,255,0.4);
+    --color-accent-subtle: #ddf4ff;
+    --color-border-default: #d0d7de;
+    --color-canvas-default: #ffffff;
+    --color-canvas-subtle: #f6f8fa;
+    --color-done-fg: #8250df;
+    --color-fg-default: #24292f;
+    --color-fg-muted: #57606a;
+    --color-fg-on-emphasis: #ffffff;
+    --color-fg-subtle: #6e7781;
+    --color-scale-blue-6: #0550ae;
+    --color-scale-gray-1: #eaeef2;
+    --color-scale-gray-2: #d0d7de;
+    --color-scale-gray-4: #8c959f;
+  }
+
+.dark-theme {
+    --color-accent-emphasis: #1f6feb;
+    --color-accent-fg: #58a6ff;
+    --color-accent-muted: rgba(56,139,253,0.4);
+    --color-accent-subtle: rgba(56,139,253,0.15);
+    --color-border-default: #30363d;
+    --color-canvas-default: #0d1117;
+    --color-canvas-subtle: #161b22;
+    --color-done-fg: #a371f7;
+    --color-fg-default: #c9d1d9;
+    --color-fg-muted: #8b949e;
+    --color-fg-on-emphasis: #ffffff;
+    --color-fg-subtle: #6e7681;
+    --color-scale-blue-6: #1158c7;
+    --color-scale-gray-1: #c9d1d9;
+    --color-scale-gray-2: #b1bac4;
+    --color-scale-gray-4: #6e7681;
+}
+
+@media (prefers-color-scheme: dark) {
+    .dark-theme {
+        --color-accent-emphasis: #1f6feb;
+        --color-accent-fg: #58a6ff;
+        --color-accent-muted: rgba(56,139,253,0.4);
+        --color-accent-subtle: rgba(56,139,253,0.15);
+        --color-border-default: #30363d;
+        --color-canvas-default: #0d1117;
+        --color-canvas-subtle: #161b22;
+        --color-done-fg: #a371f7;
+        --color-fg-default: #c9d1d9;
+        --color-fg-muted: #8b949e;
+        --color-fg-on-emphasis: #ffffff;
+        --color-fg-subtle: #6e7681;
+        --color-scale-blue-6: #1158c7;
+        --color-scale-gray-1: #c9d1d9;
+        --color-scale-gray-2: #b1bac4;
+        --color-scale-gray-4: #6e7681;
+    }
+}
+
+.card-container {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(300px, 1fr));
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 75px;
+    max-width: 45rem;
+}
+
+.project-card {
+    background: var(--color-canvas-subtle);
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin: 10px;
+    width: 323px;
+    height: 200px;
+    min-height: 200px;
+    transition: transform 0.2s ease;
+    word-wrap: break-word;
+    text-decoration: none; 
+    color: var(--color-fg-default);
+
+}
+
+.project-card:hover {
+    transform: scale(1.03);
+}
+
+.project-card img {
+    width: 100%;
+    border-radius: 8px;
+}
