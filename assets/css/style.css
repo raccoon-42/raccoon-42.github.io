@@ -464,6 +464,20 @@ button {
         padding-left: 1.4rem;
         padding-right: 1.4rem;
     }
+    .container h2,
+    .about header h1,
+    .projects-page header h1 {
+        font-size: 1.4rem;
+    }
+    .fancy-hover {
+        font-size: .92rem;
+    }
+    .project-card h3 {
+        font-size: .92rem;
+    }
+    .project-card p {
+        font-size: .82rem;
+    }
 
     .prose {
         font-size: .9em;

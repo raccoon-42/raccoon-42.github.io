@@ -1,6 +1,6 @@
 # personal-website
 
-Personal portfolio site for Ali Özkaya — a static page with a light/dark theme,
+Personal portfolio site for Ali Özkaya, a static page with a light/dark theme,
 project links, and a downloadable CV.
 
 Live: https://raccoon-42.github.io/
@@ -29,7 +29,7 @@ ln -sf ../../scripts/sync-cv.sh .git/hooks/pre-commit
 
 ## Develop
 
-It's plain HTML/CSS/JS — open `index.html` in a browser, or serve locally:
+It's plain HTML/CSS/JS. Open `index.html` in a browser, or serve locally:
 
 ```
 python3 -m http.server
