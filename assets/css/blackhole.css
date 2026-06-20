@@ -91,10 +91,32 @@ body.blackhole-404 .home-link {
     padding: 0.4em 1.1em;
     border-radius: 999px;
     background: rgba(4, 5, 10, 0.85);
-    /* soft dark clearing so the lensed field text can't crowd the link */
-    box-shadow: 0 0 16px 10px rgba(4, 5, 10, 0.85),
-                0 0 46px 32px rgba(4, 5, 10, 0.6);
+    /* soft dark clearing so the lensed field text can't crowd the link;
+       long outer falloff so it melts into the full-bleed field, no hard edge */
+    box-shadow: 0 0 18px 12px rgba(4, 5, 10, 0.92),
+                0 0 60px 44px rgba(4, 5, 10, 0.72),
+                0 0 130px 95px rgba(4, 5, 10, 0.42);
     text-shadow: 0 1px 6px #000;
     transition: color 140ms;
 }
 body.blackhole-404 .home-link:hover { color: #fff; }
+
+/* mobile: the hamburger dropdown is a dark glass panel matching the scene,
+   not the theme's light canvas (the theme toggle is hidden on this page) */
+@media (max-width: 41.99em) {
+    body.blackhole-404 .nav-menu {
+        background: rgba(8, 10, 16, 0.92);
+        border-color: rgba(230, 237, 243, 0.14);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(6px);
+    }
+    body.blackhole-404 .nav-menu a { color: #e6edf3; }
+    body.blackhole-404 .nav-menu a:hover,
+    body.blackhole-404 .nav-menu a:focus,
+    body.blackhole-404 .nav-menu a:active,
+    body.blackhole-404 .nav-menu a[aria-current="page"] {
+        background: rgba(230, 237, 243, 0.10);
+        color: #fff;
+    }
+}

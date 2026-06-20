@@ -69,9 +69,10 @@ void main() {
     c.textBaseline = 'top';
 
     let row = 0;
-    // clear bands top and bottom so the nav and "home" link stay legible
-    const top = Math.round(H * 0.075);
-    const bottom = H * 0.85;
+    // text fills the whole background; the "go home" link keeps its own dark
+    // clearing (box-shadow) so it stays legible over the field
+    const top = 0;
+    const bottom = H;
     for (let y = top; y < bottom; y += lh, row++) {
       // subtle two-tone banding gives the field some depth
       c.fillStyle = (row % 2 === 0) ? '#828ea4' : '#6d7689';
