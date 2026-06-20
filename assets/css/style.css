@@ -108,6 +108,21 @@ nav {
     margin-left: auto;
 }
 
+/* GitHub link pinned to the right of the nav bar; stays visible on mobile
+   next to the hamburger (the menu itself collapses, this doesn't) */
+.nav-social {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-fg-muted);
+    transition: color 120ms;
+}
+.nav-social:hover,
+.nav-social:focus-visible { color: var(--color-fg-default); }
+.nav-social svg { display: block; width: 20px; height: 20px; fill: currentColor; }
+/* when both are present, group them at the right with a small gap */
+.nav-social + #theme-toggle { margin-left: 0.7em; }
+
 .nav-toggle {
     display: none;
     background: none;
