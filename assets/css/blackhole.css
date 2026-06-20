@@ -51,6 +51,9 @@ body.blackhole-404 .nav-social {
 body.blackhole-404 .nav-social:hover { color: #fff; }
 body.blackhole-404 .nav-social svg { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.85)); }
 
+/* no logo on the 404 scene (a black-hole logo over the black hole is redundant) */
+body.blackhole-404 .nav-logo { display: none; }
+
 /* the theme toggle is a no-op here (this page is a forced dark scene) */
 body.blackhole-404 #theme-toggle { display: none; }
 
@@ -104,15 +107,27 @@ body.blackhole-404 .home-link {
     padding: 0.4em 1.1em;
     border-radius: 999px;
     background: rgba(4, 5, 10, 0.85);
-    /* soft dark clearing so the lensed field text can't crowd the link;
-       long outer falloff so it melts into the full-bleed field, no hard edge */
-    box-shadow: 0 0 18px 12px rgba(4, 5, 10, 0.92),
-                0 0 60px 44px rgba(4, 5, 10, 0.72),
-                0 0 130px 95px rgba(4, 5, 10, 0.42);
+    /* smooth clearing, weighted downward (more layers = softer falloff) so it
+       fades out gradually and never reaches the line above */
+    box-shadow: 0 0 12px 6px rgba(4, 5, 10, 0.82),
+                0 6px 22px 10px rgba(4, 5, 10, 0.58),
+                0 14px 38px 16px rgba(4, 5, 10, 0.34),
+                0 24px 58px 22px rgba(4, 5, 10, 0.16);
     text-shadow: 0 1px 6px #000;
     transition: color 140ms;
 }
 body.blackhole-404 .home-link:hover { color: #fff; }
+
+/* the line sits plainly over the field (no clearing of its own); the gap below
+   keeps the go-home fade from reaching it */
+body.blackhole-404 .bh-sub {
+    margin: 0 0 3.2em;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 1.05rem;
+    letter-spacing: 0.02em;
+    color: #d7dde6;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75);
+}
 
 /* mobile: the hamburger dropdown is a dark glass panel matching the scene,
    not the theme's light canvas (the theme toggle is hidden on this page) */

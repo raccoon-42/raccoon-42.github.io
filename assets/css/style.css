@@ -108,6 +108,17 @@ nav {
     margin-left: auto;
 }
 
+/* black-hole logo, top-left of the nav */
+.nav-logo {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 1.1em;
+    flex-shrink: 0;
+}
+.nav-logo img { display: block; width: 30px; height: 30px; }
+/* homepage carries the brand in the hero, so no nav logo there */
+body.index .nav-logo { display: none; }
+
 /* GitHub link pinned to the right of the nav bar; stays visible on mobile
    next to the hamburger (the menu itself collapses, this doesn't) */
 .nav-social {
@@ -185,6 +196,23 @@ header {
     }
 }
 
+/* desktop: same golden-ratio rhythm as mobile -- projects flow under the hero
+   (no 70vh centering) with gap-below-hero = 1.618 x gap-above-hero */
+@media (min-width: 42em) {
+    .index header .content {
+        margin-top: 4em;
+        margin-bottom: 0;
+    }
+    .index .container {
+        height: auto;
+        justify-content: flex-start;
+        margin-top: 6.47em;
+    }
+    .index .container > h2 {
+        margin-top: 0;
+    }
+}
+
 header .content {
     margin-bottom: 1em;
 }
@@ -215,6 +243,13 @@ header .content {
 
 .index h1 {
     margin: 0;
+}
+
+.index .hero-logo {
+    display: block;
+    width: 88px;
+    height: 88px;
+    margin: 0 auto .35em;
 }
 
 .index h1.has-subtitle {
@@ -424,6 +459,9 @@ button {
     .nav-toggle {
         display: inline-flex;
     }
+    /* mobile: logo + hamburger sit top-left; github + theme stay top-right.
+       match the logo->hamburger gap to the github->theme gap (0.7em) */
+    .nav-logo { margin-right: 0.7em; }
     .nav-menu {
         display: none;
         position: absolute;
@@ -468,9 +506,26 @@ button {
     .index .has-subtitle span {
         font-size: 1.9em;
     }
+    /* hero sits ~golden-ratio: gap below it = 1.618 x the gap above it */
     header .content {
         margin-top: 3.2em;
+        margin-bottom: 0;
     }
+    .index .tagline {
+        font-size: .78em;
+        max-width: 22em;
+        margin-left: auto;
+        margin-right: auto;
+        line-height: 1.45;
+    }
+    /* drop the desktop 70vh vertical-centering on mobile; flow projects under
+       the hero, separated by the golden-ratio gap */
+    .index .container {
+        height: auto;
+        justify-content: flex-start;
+        margin-top: 5.18em;
+    }
+    .index .container > h2 { margin-top: 0; }
     .content {
         padding-left: 1.4rem;
         padding-right: 1.4rem;
