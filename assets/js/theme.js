@@ -31,15 +31,22 @@ if (toggleBtn) {
 const navToggle = document.getElementById('nav-toggle');
 const navMenu = document.getElementById('nav-menu');
 if (navToggle && navMenu) {
+  function closeMenu() {
+    navMenu.classList.remove('open');
+    navToggle.setAttribute('aria-expanded', 'false');
+  }
   navToggle.addEventListener('click', () => {
     const open = navMenu.classList.toggle('open');
     navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
   navMenu.addEventListener('click', (e) => {
-    if (e.target.closest('a')) {
-      navMenu.classList.remove('open');
-      navToggle.setAttribute('aria-expanded', 'false');
-    }
+    if (e.target.closest('a')) closeMenu();
+  });
+  // tap/click anywhere outside the menu (and not on the toggle) closes it
+  document.addEventListener('click', (e) => {
+    if (!navMenu.classList.contains('open')) return;
+    if (navMenu.contains(e.target) || navToggle.contains(e.target)) return;
+    closeMenu();
   });
 }
 

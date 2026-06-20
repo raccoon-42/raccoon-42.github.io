@@ -133,8 +133,10 @@ body.bh-scene .bh-sub {
 /* mobile: the hamburger dropdown is a dark glass panel matching the scene,
    not the theme's light canvas (the theme toggle is hidden on this page) */
 @media (max-width: 41.99em) {
-    body.bh-scene .nav-menu {
-        background: rgba(8, 10, 16, 0.92);
+    body.bh-scene .nav-menu { background: rgba(8, 10, 16, 0.92); }
+    /* only the open panel shows the border/shadow/blur; the closed panel is
+       scaled to a point and faded out, so nothing is left behind */
+    body.bh-scene .nav-menu.open {
         border-color: rgba(230, 237, 243, 0.14);
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
         -webkit-backdrop-filter: blur(6px);

@@ -497,26 +497,29 @@ button {
         min-width: 11em;
         font-size: .95em;
         background: var(--color-canvas-default);
-        border: 1px solid var(--color-border-default);
+        border: 1px solid transparent;
         border-radius: 12px;
         padding: .5em;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
         z-index: 20;
-        /* animate open/close (display can't transition, so keep it laid out and
-           fade/scale it via opacity + transform + a deferred visibility flip) */
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(-8px) scale(0.97);
+        /* "singularity pull": the panel spirals + warps out of the point by the
+           hamburger (rotate + shear + motion-blur), whipping fast then settling
+           with an expo ease (no bounce). closing sucks it back into the point. */
         transform-origin: top left;
+        transform: scale(0.06) rotate(-65deg) skew(16deg, 8deg);
+        opacity: 0;
+        filter: blur(6px);
         pointer-events: none;
-        transition: opacity .13s ease, transform .13s ease, visibility 0s linear .13s;
+        transition: transform .36s cubic-bezier(0.16, 1, 0.3, 1),
+                    opacity .22s ease, filter .3s ease,
+                    border-color .36s ease, box-shadow .36s ease;
     }
     .nav-menu.open {
+        transform: none;
         opacity: 1;
-        visibility: visible;
-        transform: translateY(0) scale(1);
+        filter: blur(0);
         pointer-events: auto;
-        transition: opacity .13s ease, transform .13s ease, visibility 0s;
+        border-color: var(--color-border-default);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
     }
     @media (prefers-reduced-motion: reduce) {
         .nav-menu { transition: none; }
