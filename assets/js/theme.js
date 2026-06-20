@@ -42,11 +42,24 @@ if (navToggle && navMenu) {
   navMenu.addEventListener('click', (e) => {
     if (e.target.closest('a')) closeMenu();
   });
-  // tap/click anywhere outside the menu (and not on the toggle) closes it
-  document.addEventListener('click', (e) => {
+  // when open, a tap/press outside the menu ONLY dismisses it. catch it on
+  // pointerdown (capture) so the press never reaches the element beneath — that
+  // press is what gives it the :active/:focus highlight (e.g. a card turning
+  // blue). then eat the click it would have produced.
+  let swallowNextClick = false;
+  document.addEventListener('pointerdown', (e) => {
     if (!navMenu.classList.contains('open')) return;
     if (navMenu.contains(e.target) || navToggle.contains(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    swallowNextClick = true;
     closeMenu();
-  });
+  }, true);
+  document.addEventListener('click', (e) => {
+    if (!swallowNextClick) return;
+    swallowNextClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 }
 

@@ -503,15 +503,16 @@ button {
         z-index: 20;
         /* "singularity pull": the panel spirals + warps out of the point by the
            hamburger (rotate + shear + motion-blur), whipping fast then settling
-           with an expo ease (no bounce). closing sucks it back into the point. */
+           with an expo ease (no bounce). closing sucks it back into the point.
+           one transition for both directions, so open and close are equally fast. */
         transform-origin: top left;
         transform: scale(0.06) rotate(-65deg) skew(16deg, 8deg);
         opacity: 0;
         filter: blur(6px);
         pointer-events: none;
-        transition: transform .36s cubic-bezier(0.16, 1, 0.3, 1),
-                    opacity .22s ease, filter .3s ease,
-                    border-color .36s ease, box-shadow .36s ease;
+        transition: transform .26s cubic-bezier(0.16, 1, 0.3, 1),
+                    opacity .18s ease, filter .22s ease,
+                    border-color .26s ease, box-shadow .26s ease;
     }
     .nav-menu.open {
         transform: none;
