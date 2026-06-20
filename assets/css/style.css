@@ -366,6 +366,9 @@ button {
 
 /* Mobile */
 @media (max-width: 41.99em) {
+    html {
+        font-size: 1.12em;
+    }
     body {
         overflow-x: hidden;
     }
@@ -408,7 +411,7 @@ button {
         font-size: 1.9em;
     }
     header .content {
-        margin-top: 1.5em;
+        margin-top: 3.2em;
     }
     .content {
         padding-left: 1.4rem;
@@ -419,6 +422,9 @@ button {
         padding-right: 1.4rem;
     }
 
+    .prose {
+        font-size: .9em;
+    }
     .prose h2 {
         font-size: 1.05rem;
     }
