@@ -312,3 +312,81 @@ button {
 .social a:hover svg {
     fill: var(--color-accent-fg);
 }
+
+/* Projects section */
+.projects {
+    margin: 3rem auto 1rem;
+}
+
+.projects h2 {
+    text-align: center;
+    margin: 0;
+}
+
+/* About page */
+.prose {
+    line-height: 1.6;
+    padding-bottom: 1rem;
+}
+
+.prose p {
+    margin: 0 0 1rem;
+}
+
+.prose h2 {
+    margin: 1.8rem 0 .6rem;
+    font-size: 1.15rem;
+}
+
+.prose ul {
+    padding-left: 1.2rem;
+    margin: 0 0 1rem;
+}
+
+.prose li {
+    margin-bottom: .35rem;
+}
+
+.prose a,
+.prose a:visited {
+    color: var(--color-accent-fg);
+    text-decoration: none;
+}
+
+.prose a:hover {
+    text-decoration: underline;
+}
+
+/* Navigation wrapping + mobile */
+nav ul {
+    flex-wrap: wrap;
+    row-gap: .4em;
+}
+
+@media (max-width: 41.99em) {
+    body {
+        overflow-x: hidden;
+    }
+    .index .header-inner {
+        display: block;
+    }
+    .index h1.has-subtitle {
+        font-size: 1em;
+    }
+    .index .has-subtitle span {
+        font-size: 2.3em;
+    }
+    header .content {
+        margin-top: 1.5em;
+    }
+    nav ul {
+        margin: 1em 0;
+        font-size: .8em;
+    }
+    nav li {
+        margin-right: .6em;
+    }
+    .prose h2 {
+        font-size: 1.05rem;
+    }
+}

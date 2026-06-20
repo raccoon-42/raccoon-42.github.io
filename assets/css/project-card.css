@@ -59,34 +59,50 @@
 
 .card-container {
     display: grid;
-    grid-template-columns: repeat(2, minmax(300px, 1fr));
-    margin-left: auto;
-    margin-right: auto;
-    margin-top: 75px;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+    margin: 2rem auto 0;
     max-width: 45rem;
+    padding: 0 .5em;
 }
 
 .project-card {
+    display: flex;
+    flex-direction: column;
     background: var(--color-canvas-subtle);
+    border: 1px solid var(--color-border-default);
     border-radius: 12px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin: 10px;
-    width: 323px;
-    height: 200px;
-    min-height: 200px;
-    transition: transform 0.2s ease;
+    padding: 1.1rem 1.2rem;
+    transition: transform 0.15s ease, border-color 0.15s ease;
     word-wrap: break-word;
-    text-decoration: none; 
+    text-decoration: none;
     color: var(--color-fg-default);
-
 }
 
 .project-card:hover {
-    transform: scale(1.03);
+    transform: translateY(-3px);
+    border-color: var(--color-accent-fg);
 }
 
-.project-card img {
-    width: 100%;
-    border-radius: 8px;
+.project-card h3 {
+    margin: 0 0 .45rem;
+    font-size: .95rem;
+    color: var(--color-fg-default);
+}
+
+.project-card:hover h3 {
+    color: var(--color-accent-fg);
+}
+
+.project-card p {
+    margin: 0;
+    font-size: .78rem;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+}
+
+.project-card .repo {
+    margin-top: .7rem;
+    font-size: .72rem;
+    color: var(--color-fg-subtle);
 }

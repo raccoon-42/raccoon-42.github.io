@@ -1,18 +1,28 @@
 const toggleBtn = document.getElementById('theme-toggle');
 const root = document.documentElement;
 
-const savedTheme = localStorage.getItem('theme');
-if (savedTheme === 'dark') {
-  root.classList.add('dark-theme');
-} else if (savedTheme === 'light') {
-  root.classList.remove('dark-theme');
-} else {
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (prefersDark) root.classList.add('dark-theme');
+function setIcon(isDark) {
+  if (toggleBtn) toggleBtn.innerHTML = isDark ? '🌙' : '☀️';
 }
 
-toggleBtn.addEventListener('click', () => {
-  toggleBtn.innerHTML = toggleBtn.innerHTML === '🌙' ? '☀️' : '🌙';
-  const isDark = root.classList.toggle('dark-theme');
-  localStorage.setItem('theme', isDark ? 'dark' : 'light');
-});
+// Resolve the theme: saved preference wins, otherwise follow the OS.
+const savedTheme = localStorage.getItem('theme');
+let isDark;
+if (savedTheme === 'dark') {
+  isDark = true;
+} else if (savedTheme === 'light') {
+  isDark = false;
+} else {
+  isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+root.classList.toggle('dark-theme', isDark);
+setIcon(isDark);
+
+if (toggleBtn) {
+  toggleBtn.addEventListener('click', () => {
+    const nowDark = root.classList.toggle('dark-theme');
+    localStorage.setItem('theme', nowDark ? 'dark' : 'light');
+    setIcon(nowDark);
+  });
+}

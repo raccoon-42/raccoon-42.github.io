@@ -3,32 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CodeSpace by Ali</title>
-    <meta name="description" content="CodeSpace by Ali — portfolio of Ali Özkaya, a Computer Engineering student building and shipping LLM-powered systems." />
+    <title>Projects — CodeSpace by Ali</title>
+    <meta name="description" content="Projects by Ali Özkaya — LLM fine-tuning, RAG, agents, and music captioning." />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
 
     <!-- Open Graph / link preview -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="CodeSpace by Ali" />
-    <meta property="og:description" content="Portfolio of Ali Özkaya — building and shipping LLM-powered systems." />
-    <meta property="og:url" content="https://raccoon-42.github.io/" />
+    <meta property="og:title" content="Projects — CodeSpace by Ali" />
+    <meta property="og:description" content="LLM fine-tuning, RAG, agents, and music captioning." />
+    <meta property="og:url" content="https://raccoon-42.github.io/projects.html" />
     <meta property="og:image" content="https://raccoon-42.github.io/assets/og.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="CodeSpace by Ali" />
     <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="stylesheet" href="assets/css/style.css" />
-    <link rel="stylesheet" href="assets/css/hover.css" />
-    <link rel="stylesheet" href="assets/css/starfield.css" />
     <link rel="stylesheet" href="assets/css/project-card.css" />
 
     <!-- Privacy-friendly analytics (GoatCounter): sign up free at goatcounter.com,
          replace YOURCODE, then uncomment to activate. -->
     <!-- <script data-goatcounter="https://YOURCODE.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script> -->
 </head>
-<body class="page index">
+<body class="page projects-page">
     <nav>
         <ul>
             <li><a href="index.html">Home</a></li>
@@ -41,54 +37,42 @@
     </nav>
 
     <header>
-        <div class="header-inner">
-            <div class="content">
-                <h1 class="has-subtitle">
-                    <span>CodeSpace</span>
-                    <small>by Ali</small>
-                </h1>
-                <p class="tagline">A personal portfolio website, and other possible quirks.</p>
-            </div>
-            
-
+        <div class="content">
+            <h1>Projects</h1>
         </div>
     </header>
 
-    
-    <div class="container">
-        <h2 id="projects">
-            <span>Projects</span>
-        </h2>
-        <ul class="fancy-hover">
-            <li style="--sibling-index: 1;">
-                <a href="https://github.com/raccoon-42/lora-lyrics" target="_blank" rel="noopener noreferrer">
-                    QLoRA Lyric Generation
-                </a>
-            </li>
-            <li style="--sibling-index: 2;">
-                <a href="https://github.com/raccoon-42/audio-caption" target="_blank" rel="noopener noreferrer">
-                    Music Captioning Ablation Study
-                </a>
-            </li>
-            <li style="--sibling-index: 3;">
-                <a href="https://github.com/raccoon-42/mhrs-mcp" target="_blank" rel="noopener noreferrer">
-                    MHRS MCP Server
-                </a>
-            </li>
-            <li style="--sibling-index: 4;">
-                <a href="https://github.com/raccoon-42/student-affairs-chatbot" target="_blank" rel="noopener noreferrer">
-                    RAG Student Affairs Chatbot
-                </a>
-            </li>
-        </ul>
-    </div>
+    <main>
+        <div class="card-container">
+            <a class="project-card" href="https://github.com/raccoon-42/lora-lyrics" target="_blank" rel="noopener noreferrer">
+                <h3>QLoRA Lyric Generation</h3>
+                <p>Per-artist QLoRA adapters on Gemma 4 for style-conditional lyric generation, with inference-time adapter blending between artists.</p>
+                <span class="repo">raccoon-42/lora-lyrics</span>
+            </a>
+            <a class="project-card" href="https://github.com/raccoon-42/audio-caption" target="_blank" rel="noopener noreferrer">
+                <h3>Music Captioning Ablation Study</h3>
+                <p>A ClipCap-style music captioner on MusicCaps, with a two-axis ablation across language models and audio encoders. Graduation project.</p>
+                <span class="repo">raccoon-42/audio-caption</span>
+            </a>
+            <a class="project-card" href="https://github.com/raccoon-42/mhrs-mcp" target="_blank" rel="noopener noreferrer">
+                <h3>MHRS MCP Server</h3>
+                <p>An MCP server exposing Turkey's national hospital appointment system as tools an LLM can call — search, book, modify and cancel from natural language.</p>
+                <span class="repo">raccoon-42/mhrs-mcp</span>
+            </a>
+            <a class="project-card" href="https://github.com/raccoon-42/student-affairs-chatbot" target="_blank" rel="noopener noreferrer">
+                <h3>RAG Student Affairs Chatbot</h3>
+                <p>A Turkish-language RAG chatbot over university academic calendars and regulations, using hybrid BM25 + dense retrieval behind a FastAPI service.</p>
+                <span class="repo">raccoon-42/student-affairs-chatbot</span>
+            </a>
+        </div>
+    </main>
 
     <footer>
         <div class="footer-inner">
             <figure>
                 <img src="assets/img/profile.jpg" alt="Ali Özkaya">
             </figure>
-            
+
 
             <div class="footer-content">
                 <p>© 2026 CodeSpace. All rights reserved.</p>
