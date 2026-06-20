@@ -248,11 +248,25 @@ header .content {
     margin: 0;
 }
 
+/* the hero logo is a portal into the full black hole scene (/void.html);
+   a gentle pull-in on hover hints it's clickable */
+.index .hero-logo-link {
+    display: block;
+    width: fit-content;
+    margin: 0 auto .35em;
+    transition: transform 260ms ease, filter 260ms ease;
+}
+.index .hero-logo-link:hover,
+.index .hero-logo-link:focus-visible {
+    transform: scale(1.07);
+    filter: drop-shadow(0 0 16px rgba(124, 92, 220, 0.55));
+}
+
 .index .hero-logo {
     display: block;
     width: 88px;
     height: 88px;
-    margin: 0 auto .35em;
+    margin: 0;
 }
 
 .index h1.has-subtitle {
@@ -470,9 +484,9 @@ button {
     .nav-toggle {
         display: inline-flex;
     }
-    /* mobile: logo + hamburger sit top-left; github + theme stay top-right.
-       match the logo->hamburger gap to the github->theme gap (0.7em) */
-    .nav-logo { margin-right: 0.7em; }
+    /* mobile: drop the logo on every page so the hamburger is leftmost and sits
+       in the same spot everywhere — muscle memory, avoids stray taps on the logo */
+    .nav-logo { display: none; }
     .nav-menu {
         display: flex;
         flex-direction: column;

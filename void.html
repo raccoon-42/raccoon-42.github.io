@@ -5,20 +5,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 | CodeSpace by Ali</title>
-    <meta name="description" content="this page got pulled into a black hole." />
+    <title>void | CodeSpace by Ali</title>
+    <meta name="description" content="a Schwarzschild black hole, traced one ray per pixel." />
     <meta name="robots" content="noindex" />
-    <!-- link preview: shared black-hole card (assets/og.png); copy is 404-specific -->
+    <!-- link preview: shared black-hole card (assets/og.png) -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="404 | CodeSpace by Ali" />
-    <meta property="og:description" content="this page got pulled into a black hole." />
-    <meta property="og:url" content="https://raccoon-42.github.io/404.html" />
+    <meta property="og:title" content="void | CodeSpace by Ali" />
+    <meta property="og:description" content="a Schwarzschild black hole, traced one ray per pixel." />
+    <meta property="og:url" content="https://raccoon-42.github.io/void.html" />
     <meta property="og:image" content="https://raccoon-42.github.io/assets/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="CodeSpace by Ali over a black hole bending a field of text" />
+    <meta property="og:image:alt" content="a black hole bending a field of text" />
     <meta name="twitter:card" content="summary_large_image" />
-    <!-- Root-absolute paths so assets resolve no matter what bad URL GitHub Pages 404s on -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
@@ -36,12 +35,25 @@
     <header>
         <div class="header-inner">
             <div class="content">
-                <h1 class="visually-hidden">404 | page not found</h1>
-                <a class="home-link" href="/index.html">go home</a>
+                <h1 class="visually-hidden">the void</h1>
+                <p class="bh-sub">a Schwarzschild black hole, traced one ray per pixel</p>
+                <a class="home-link" href="/index.html">&larr; back</a>
             </div>
         </div>
     </header>
 
+    <script>
+      // page-specific lensed field (no 404 references here); house style: lowercase, no em-dashes
+      window.BLACKHOLE_LINES = [
+        'light bends around a single point',
+        'nothing escapes once it falls in',
+        'gravity curves the space around it',
+        'a star collapsed into a singularity',
+        'time slows as you approach the edge',
+        'the field ripples where mass warps it',
+        'every path leads to the center',
+      ];
+    </script>
     <script src="/assets/js/blackhole.js"></script>
     <script src="/assets/js/theme.js"></script>
 </body>

@@ -1,8 +1,8 @@
-/* 404 black hole scene: a self-contained dark space backdrop.
-   The hole needs darkness, so this page renders its own scene
-   regardless of the light/dark theme toggle. */
+/* black hole scene: a self-contained dark space backdrop, shared by the 404
+   page and the standalone /void.html. The hole needs darkness, so these pages
+   render their own scene regardless of the light/dark theme toggle. */
 
-body.blackhole-404 {
+body.bh-scene {
     background: transparent;          /* let the canvas (z-index:-1) show through */
     color: #e6edf3;
     overflow: hidden;                 /* full-viewport scene, no scroll */
@@ -20,27 +20,27 @@ body.blackhole-404 {
 
 
 /* keep the copy legible over the dark scene, regardless of theme */
-body.blackhole-404 nav a,
-body.blackhole-404 header,
-body.blackhole-404 .tagline,
-body.blackhole-404 h1,
-body.blackhole-404 h1 small {
+body.bh-scene nav a,
+body.bh-scene header,
+body.bh-scene .tagline,
+body.bh-scene h1,
+body.bh-scene h1 small {
     color: #e6edf3;
 }
 
-body.blackhole-404 .tagline { color: #c2ccd6; }
-body.blackhole-404 .tagline a { color: #8ab4ff; }
+body.bh-scene .tagline { color: #c2ccd6; }
+body.bh-scene .tagline a { color: #8ab4ff; }
 
-body.blackhole-404 header,
-body.blackhole-404 .tagline {
+body.bh-scene header,
+body.bh-scene .tagline {
     text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65);
 }
 
-body.blackhole-404 .nav-toggle svg path { stroke: #e6edf3; }
+body.bh-scene .nav-toggle svg path { stroke: #e6edf3; }
 
 /* GitHub icon: pinned to the top-right corner, floating over the scene
    (not lensed like the nav links, kept crisp and clickable) */
-body.blackhole-404 .nav-social {
+body.bh-scene .nav-social {
     position: fixed;
     top: 1.1em;
     right: 1.2em;
@@ -48,30 +48,30 @@ body.blackhole-404 .nav-social {
     margin: 0;
     color: #c2ccd6;
 }
-body.blackhole-404 .nav-social:hover { color: #fff; }
-body.blackhole-404 .nav-social svg { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.85)); }
+body.bh-scene .nav-social:hover { color: #fff; }
+body.bh-scene .nav-social svg { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.85)); }
 
 /* no logo on the 404 scene (a black-hole logo over the black hole is redundant) */
-body.blackhole-404 .nav-logo { display: none; }
+body.bh-scene .nav-logo { display: none; }
 
 /* the theme toggle is a no-op here (this page is a forced dark scene) */
-body.blackhole-404 #theme-toggle { display: none; }
+body.bh-scene #theme-toggle { display: none; }
 
 /* desktop, WebGL2 live: the nav's visible text is drawn into the lensed field,
    so the real links go transparent (still clickable) over their bent labels */
 @media (min-width: 42em) {
-    body.blackhole-404.bh-lensed-nav .nav-menu a,
-    body.blackhole-404.bh-lensed-nav .nav-menu a:hover {
+    body.bh-scene.bh-lensed-nav .nav-menu a,
+    body.bh-scene.bh-lensed-nav .nav-menu a:hover {
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
         color: transparent;                          /* visible label is the lensed copy */
     }
     /* suppress the site's flat hover underline bar (it can't track the bent text);
        the pointer cursor is the hover cue */
-    body.blackhole-404.bh-lensed-nav .nav-menu a::after { display: none; }
+    body.bh-scene.bh-lensed-nav .nav-menu a::after { display: none; }
 }
 
 /* heading kept for screen readers only; the visible "404" lives in the canvas */
-body.blackhole-404 .visually-hidden {
+body.bh-scene .visually-hidden {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -85,7 +85,7 @@ body.blackhole-404 .visually-hidden {
 }
 
 /* the explanatory line + home link sit below the hole, flat and clickable */
-body.blackhole-404 header {
+body.bh-scene header {
     position: fixed;
     left: 0;
     right: 0;
@@ -93,11 +93,11 @@ body.blackhole-404 header {
     z-index: 2;
 }
 
-body.blackhole-404 .header-inner { display: block; }
-body.blackhole-404 header .content { text-align: center; }
+body.bh-scene .header-inner { display: block; }
+body.bh-scene header .content { text-align: center; }
 
 /* "home" stays intact: the one thing that doesn't fall into the hole */
-body.blackhole-404 .home-link {
+body.bh-scene .home-link {
     display: inline-block;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     font-size: 1em;
@@ -109,18 +109,19 @@ body.blackhole-404 .home-link {
     background: rgba(4, 5, 10, 0.85);
     /* smooth clearing, weighted downward (more layers = softer falloff) so it
        fades out gradually and never reaches the line above */
-    box-shadow: 0 0 12px 6px rgba(4, 5, 10, 0.82),
-                0 6px 22px 10px rgba(4, 5, 10, 0.58),
-                0 14px 38px 16px rgba(4, 5, 10, 0.34),
-                0 24px 58px 22px rgba(4, 5, 10, 0.16);
+    box-shadow: 0 0 14px 7px rgba(4, 5, 10, 0.82),
+                0 8px 30px 13px rgba(4, 5, 10, 0.56),
+                0 20px 54px 22px rgba(4, 5, 10, 0.34),
+                0 36px 86px 32px rgba(4, 5, 10, 0.18),
+                0 54px 120px 44px rgba(4, 5, 10, 0.08);
     text-shadow: 0 1px 6px #000;
     transition: color 140ms;
 }
-body.blackhole-404 .home-link:hover { color: #fff; }
+body.bh-scene .home-link:hover { color: #fff; }
 
 /* the line sits plainly over the field (no clearing of its own); the gap below
    keeps the go-home fade from reaching it */
-body.blackhole-404 .bh-sub {
+body.bh-scene .bh-sub {
     margin: 0 0 3.2em;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     font-size: 1.05rem;
@@ -132,18 +133,18 @@ body.blackhole-404 .bh-sub {
 /* mobile: the hamburger dropdown is a dark glass panel matching the scene,
    not the theme's light canvas (the theme toggle is hidden on this page) */
 @media (max-width: 41.99em) {
-    body.blackhole-404 .nav-menu {
+    body.bh-scene .nav-menu {
         background: rgba(8, 10, 16, 0.92);
         border-color: rgba(230, 237, 243, 0.14);
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
         -webkit-backdrop-filter: blur(6px);
         backdrop-filter: blur(6px);
     }
-    body.blackhole-404 .nav-menu a { color: #e6edf3; }
-    body.blackhole-404 .nav-menu a:hover,
-    body.blackhole-404 .nav-menu a:focus,
-    body.blackhole-404 .nav-menu a:active,
-    body.blackhole-404 .nav-menu a[aria-current="page"] {
+    body.bh-scene .nav-menu a { color: #e6edf3; }
+    body.bh-scene .nav-menu a:hover,
+    body.bh-scene .nav-menu a:focus,
+    body.bh-scene .nav-menu a:active,
+    body.bh-scene .nav-menu a[aria-current="page"] {
         background: rgba(230, 237, 243, 0.10);
         color: #fff;
     }

@@ -1,4 +1,4 @@
-/* Black hole renderer for the 404 page.
+/* Black hole renderer for the 404 page and the standalone /void.html.
    Runs a ported WebGL2 fragment shader (assets/shaders/blackhole.frag): a
    per-pixel geodesic trace of a Schwarzschild black hole. The whole screen is
    filled with a field of monospace text and fed in as the lens plane, so the
@@ -18,7 +18,9 @@
   const MAXQ = 2; // render resolution cap; full device pixels so it's sharp at 100% zoom
 
   // the field of text the hole bends. lowercase, no em-dashes (house style).
-  const LINES = [
+  // a page can override the copy via window.BLACKHOLE_LINES (e.g. /void.html);
+  // these defaults are the 404 set.
+  const LINES = (window.BLACKHOLE_LINES && window.BLACKHOLE_LINES.length) ? window.BLACKHOLE_LINES : [
     '404 not found',
     'that page drifted off into space',
     'head back where you belong',
@@ -26,7 +28,6 @@
     'GET /lost returns 404',
     'nothing here but the pull of gravity',
     'the map ends where the light bends',
-    'you have drifted past the event horizon',
   ];
 
   const VERT = `#version 300 es
