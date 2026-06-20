@@ -3,7 +3,7 @@
 Personal portfolio site for Ali Özkaya — a static page with a light/dark theme,
 project links, and a downloadable CV.
 
-Live: https://raccoon-42.github.io/personal-website/
+Live: https://raccoon-42.github.io/
 
 ## Structure
 
