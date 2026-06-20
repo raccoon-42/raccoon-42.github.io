@@ -12,12 +12,13 @@
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
     <link rel="stylesheet" href="/assets/css/style.css" />
     <link rel="stylesheet" href="/assets/css/hover.css" />
-    <link rel="stylesheet" href="/assets/css/starfield.css" />
+    <link rel="stylesheet" href="/assets/css/blackhole.css" />
 
     <!-- Privacy-friendly analytics (GoatCounter) -->
     <script data-goatcounter="https://aliozkaya.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </head>
-<body class="page index">
+<body class="page index blackhole-404">
+    <canvas id="blackhole-canvas" aria-hidden="true"></canvas>
     <nav>
         <button id="nav-toggle" class="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-menu">
             <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
@@ -38,15 +39,16 @@
     <header>
         <div class="header-inner">
             <div class="content">
-                <h1 class="has-subtitle">
-                    <span>404</span>
-                    <small>page not found</small>
-                </h1>
-                <p class="tagline">that page drifted off into space. head back where you belong. <a href="/index.html">home.</a></p>
+                <!-- the visible "404"/message is the text field bent by the hole in
+                     the canvas; these stay in the DOM for screen readers / SEO -->
+                <h1 class="visually-hidden">404 | page not found</h1>
+                <p class="visually-hidden">that page drifted off into space. head back where you belong.</p>
+                <a class="home-link" href="/index.html">go home</a>
             </div>
         </div>
     </header>
 
+    <script src="/assets/js/blackhole.js"></script>
     <script src="/assets/js/theme.js"></script>
 </body>
 </html>

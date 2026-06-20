@@ -1,0 +1,100 @@
+/* 404 black hole scene: a self-contained dark space backdrop.
+   The hole needs darkness, so this page renders its own scene
+   regardless of the light/dark theme toggle. */
+
+body.blackhole-404 {
+    background: transparent;          /* let the canvas (z-index:-1) show through */
+    color: #e6edf3;
+    overflow: hidden;                 /* full-viewport scene, no scroll */
+}
+
+#blackhole-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: -1;
+    background: #04060c;              /* fallback before JS paints the first frame */
+}
+
+
+/* keep the copy legible over the dark scene, regardless of theme */
+body.blackhole-404 nav a,
+body.blackhole-404 header,
+body.blackhole-404 .tagline,
+body.blackhole-404 h1,
+body.blackhole-404 h1 small {
+    color: #e6edf3;
+}
+
+body.blackhole-404 .tagline { color: #c2ccd6; }
+body.blackhole-404 .tagline a { color: #8ab4ff; }
+
+body.blackhole-404 header,
+body.blackhole-404 .tagline {
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65);
+}
+
+body.blackhole-404 .nav-toggle svg path { stroke: #e6edf3; }
+
+/* the theme toggle is a no-op here (this page is a forced dark scene) */
+body.blackhole-404 #theme-toggle { display: none; }
+
+/* desktop, WebGL2 live: the nav's visible text is drawn into the lensed field,
+   so the real links go transparent (still clickable) over their bent labels */
+@media (min-width: 42em) {
+    body.blackhole-404.bh-lensed-nav .nav-menu a,
+    body.blackhole-404.bh-lensed-nav .nav-menu a:hover {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        color: transparent;                          /* visible label is the lensed copy */
+    }
+    /* suppress the site's flat hover underline bar (it can't track the bent text);
+       the pointer cursor is the hover cue */
+    body.blackhole-404.bh-lensed-nav .nav-menu a::after { display: none; }
+}
+
+/* heading kept for screen readers only; the visible "404" lives in the canvas */
+body.blackhole-404 .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* the explanatory line + home link sit below the hole, flat and clickable */
+body.blackhole-404 header {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 11vh;                    /* sits just under the message line (msgY 0.85) */
+    z-index: 2;
+}
+
+body.blackhole-404 .header-inner { display: block; }
+body.blackhole-404 header .content { text-align: center; }
+
+/* "home" stays intact: the one thing that doesn't fall into the hole */
+body.blackhole-404 .home-link {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 1em;
+    letter-spacing: 0.04em;
+    color: #f1f4f9;
+    text-decoration: none;
+    padding: 0.4em 1.1em;
+    border-radius: 999px;
+    background: rgba(4, 5, 10, 0.85);
+    /* soft dark clearing so the lensed field text can't crowd the link */
+    box-shadow: 0 0 16px 10px rgba(4, 5, 10, 0.85),
+                0 0 46px 32px rgba(4, 5, 10, 0.6);
+    text-shadow: 0 1px 6px #000;
+    transition: color 140ms;
+}
+body.blackhole-404 .home-link:hover { color: #fff; }
