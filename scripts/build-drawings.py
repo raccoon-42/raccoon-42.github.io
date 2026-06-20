@@ -115,10 +115,10 @@ def main():
     rest_html = "\n".join(figure(i) for i in titled + untitled)
 
     highlights_block = (
-        f'    <p class="section-label">Highlights</p>\n'
+        f'    <p class="section-label">highlights</p>\n'
         f'    <div class="highlights">\n{hl_html}\n    </div>\n' if highlights else ""
     )
-    rest_label = '    <p class="section-label">More</p>\n' if highlights and rest_html else ""
+    rest_label = '    <p class="section-label">more</p>\n' if highlights and rest_html else ""
 
     OUT.write_text(PAGE.format(
         highlights=highlights_block,
@@ -134,7 +134,7 @@ PAGE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Drawings | CodeSpace by Ali</title>
+    <title>drawings | CodeSpace by Ali</title>
     <meta name="description" content="A gallery of drawings by Ali Ozkaya." />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
@@ -142,7 +142,7 @@ PAGE = """<!DOCTYPE html>
 
     <!-- Open Graph / link preview -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Drawings | CodeSpace by Ali" />
+    <meta property="og:title" content="drawings | CodeSpace by Ali" />
     <meta property="og:description" content="A gallery of drawings by Ali Ozkaya." />
     <meta property="og:url" content="https://raccoon-42.github.io/drawings.html" />
     <meta property="og:image" content="https://raccoon-42.github.io/assets/og.png" />
@@ -162,11 +162,11 @@ PAGE = """<!DOCTYPE html>
             </svg>
         </button>
         <ul class="nav-menu" id="nav-menu">
-            <li><a href="index.html">Home</a></li>
-            <li><a href="about.html">About</a></li>
-            <li><a href="projects.html">Projects</a></li>
-            <li><a href="drawings.html" aria-current="page">Drawings</a></li>
-            <li><a href="mailto:aliozkaya00@gmail.com">Contact</a></li>
+            <li><a href="index.html">home</a></li>
+            <li><a href="about.html">about</a></li>
+            <li><a href="projects.html">projects</a></li>
+            <li><a href="drawings.html" aria-current="page">drawings</a></li>
+            <li><a href="mailto:aliozkaya00@gmail.com">contact</a></li>
             <li><a href="assets/Ali_Ozkaya_CV.pdf" download>CV</a></li>
         </ul>
         <button id="theme-toggle" class="change-color-theme" title="Toggle Theme">&#9728;&#65039;</button>
@@ -175,7 +175,7 @@ PAGE = """<!DOCTYPE html>
     <header>
         <div class="header-inner">
             <div class="content">
-                <h1 class="drawings-title">Drawings</h1>
+                <h1 class="drawings-title">drawings</h1>
                 <p class="drawings-subtitle">memories from a sketchbook</p>
             </div>
         </div>

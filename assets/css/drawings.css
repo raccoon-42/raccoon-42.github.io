@@ -27,7 +27,6 @@
 .gallery .section-label {
     font-size: 0.8rem;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--color-fg-muted);
     margin: 2rem 0 0.9rem;
 }
