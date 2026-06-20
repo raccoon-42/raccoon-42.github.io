@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CodeSpace</title>
-    <link rel="stylesheet" href="style.css"></link>
-    <link rel="stylesheet" href="hover2.css" />
-    <link rel="stylesheet" href="starfield.css" />
-    <link rel="stylesheet" href="project-card.css" />
+    <link rel="stylesheet" href="assets/css/style.css" />
+    <link rel="stylesheet" href="assets/css/hover.css" />
+    <link rel="stylesheet" href="assets/css/starfield.css" />
+    <link rel="stylesheet" href="assets/css/project-card.css" />
 
 </head>
 <body class="page index">
@@ -29,6 +29,7 @@
                     <small>by Ali</small>
                 </h1>
                 <p class="tagline">A personal portfolio website, and other possible quirks.</p>
+                <a class="cv-download" href="assets/Ali_Ozkaya_CV.pdf" download>Download CV</a>
             </div>
             
 
@@ -36,31 +37,43 @@
     </header>
 
     
-
-    <div class="container" >
+    <div class="container">
         <h2 id="projects">
             <span>Projects</span>
         </h2>
         <ul class="fancy-hover">
             <li style="--sibling-index: 1;">
-                <a href="https://github.com/raccoon-42/student-affairs-chatbot">
+                <a href="https://github.com/raccoon-42/lora-lyrics" target="_blank" rel="noopener noreferrer">
+                    QLoRA Lyric Generation
+                </a>
+            </li>
+            <li style="--sibling-index: 2;">
+                <a href="https://github.com/raccoon-42/audio-caption" target="_blank" rel="noopener noreferrer">
+                    Audio Captioning Ablation Study
+                </a>
+            </li>
+            <li style="--sibling-index: 3;">
+                <a href="https://github.com/raccoon-42/mhrs-mcp" target="_blank" rel="noopener noreferrer">
+                    MHRS MCP Server
+                </a>
+            </li>
+            <li style="--sibling-index: 4;">
+                <a href="https://github.com/raccoon-42/student-affairs-chatbot" target="_blank" rel="noopener noreferrer">
                     RAG Student Affairs Chatbot
                 </a>
-            <li style="--sibling-index: 2;">Agentic AI: MHRS Scheduler</li>
-            <li style="--sibling-index: 3;">Evolutionary Melody Generator</li>
-
+            </li>
         </ul>
     </div>
 
     <footer>
         <div class="footer-inner">
             <figure>
-                <img src="img/profile.jpg" alt="Author">
+                <img src="assets/img/profile.jpg" alt="Author">
             </figure>
             
 
             <div class="footer-content">
-                <p>© 2025 CodeSpace. All rights reserved.</p>
+                <p>© 2026 CodeSpace. All rights reserved.</p>
                 <ul class="social">
                     <li>
                         <a href="https://github.com/raccoon-42">
@@ -73,6 +86,6 @@
             </div>
         </div>
     </footer>
-    <script src="theme.js"></script>
+    <script src="assets/js/theme.js"></script>
 </body>
 </html>
