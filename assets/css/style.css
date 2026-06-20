@@ -122,6 +122,38 @@ nav {
     display: block;
 }
 
+.nav-menu a {
+    position: relative;
+    display: inline-block;
+}
+
+/* Desktop: underline bar on hover / current page */
+@media (min-width: 42em) {
+    .nav-menu a {
+        padding-bottom: .35em;
+    }
+    .nav-menu a::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        border-radius: 3px;
+        background: var(--color-fg-muted);
+        opacity: 0;
+        transition: opacity 120ms ease;
+    }
+    .nav-menu a:hover::after,
+    .nav-menu a[aria-current="page"]::after {
+        opacity: 1;
+    }
+    .nav-menu a:hover,
+    .nav-menu a[aria-current="page"] {
+        color: var(--color-fg-default);
+    }
+}
+
 
 header {
 }
@@ -397,6 +429,13 @@ button {
     .nav-menu a {
         display: block;
         padding: .55em 1.1em;
+    }
+    .nav-menu a:hover,
+    .nav-menu a:focus,
+    .nav-menu a:active,
+    .nav-menu a[aria-current="page"] {
+        background: var(--color-border-default);
+        color: var(--color-fg-default);
     }
 
     /* Centered, condensed header */
