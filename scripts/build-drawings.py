@@ -135,7 +135,7 @@ PAGE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>drawings | CodeSpace by Ali</title>
-    <meta name="description" content="A gallery of drawings by Ali Ozkaya." />
+    <meta name="description" content="a gallery of drawings by Ali Ozkaya." />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
@@ -143,7 +143,7 @@ PAGE = """<!DOCTYPE html>
     <!-- Open Graph / link preview -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="drawings | CodeSpace by Ali" />
-    <meta property="og:description" content="A gallery of drawings by Ali Ozkaya." />
+    <meta property="og:description" content="a gallery of drawings by Ali Ozkaya." />
     <meta property="og:url" content="https://raccoon-42.github.io/drawings.html" />
     <meta property="og:image" content="https://raccoon-42.github.io/assets/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
