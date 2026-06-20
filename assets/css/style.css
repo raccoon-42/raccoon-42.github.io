@@ -207,6 +207,9 @@ header {
         height: auto;
         justify-content: flex-start;
         margin-top: 6.47em;
+        /* tall enough that the footer (and its divider) stays below the fold on
+           big monitors -- projects sit at the top, slack fills below them */
+        min-height: calc(100vh - 24rem);
     }
     .index .container > h2 {
         margin-top: 0;
@@ -463,11 +466,11 @@ button {
        match the logo->hamburger gap to the github->theme gap (0.7em) */
     .nav-logo { margin-right: 0.7em; }
     .nav-menu {
-        display: none;
+        display: flex;
+        flex-direction: column;
         position: absolute;
         top: calc(100% + .4em);
         left: 1em;
-        flex-direction: column;
         gap: 2px;
         min-width: 11em;
         font-size: .95em;
@@ -477,9 +480,24 @@ button {
         padding: .5em;
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
         z-index: 20;
+        /* animate open/close (display can't transition, so keep it laid out and
+           fade/scale it via opacity + transform + a deferred visibility flip) */
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px) scale(0.97);
+        transform-origin: top left;
+        pointer-events: none;
+        transition: opacity .13s ease, transform .13s ease, visibility 0s linear .13s;
     }
     .nav-menu.open {
-        display: flex;
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+        transition: opacity .13s ease, transform .13s ease, visibility 0s;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .nav-menu { transition: none; }
     }
     .nav-menu a {
         display: block;
