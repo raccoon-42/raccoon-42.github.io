@@ -73,11 +73,14 @@ body {
     margin: 0;
 }
 
-@media (min-width: 42em) {
-    nav {
-        flex-direction: row;
-        justify-content: space-between;
-    }
+nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 1em;
+    position: relative;
 }
 
 @media (min-width: 69em) {
@@ -87,36 +90,36 @@ body {
     }
 }
 
-nav {
-    display: flex;
-    flex-wrap: wrap;
-    overflow: hidden;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-nav ul {
-    width: 100%;
+.nav-menu {
     font-family: "Helvetica Neue", sans-serif;
     font-size: .75em;
     list-style-type: none;
-    padding-left: 0;
+    margin: 0;
+    padding: 0;
     display: flex;
-    justify-content: space-between;
-    margin: 1em -1em;
+    gap: 2em;
 }
 
-nav li {
-    padding: 0 1em;
+.nav-menu li {
+    padding: 0;
 }
 
-nav li.pull {
+#theme-toggle {
     margin-left: auto;
 }
 
-nav li {
-    display: inline-block;
-    margin-right: 1em;
+.nav-toggle {
+    display: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    color: var(--color-fg-muted);
+    line-height: 0;
+}
+
+.nav-toggle svg {
+    display: block;
 }
 
 
@@ -165,6 +168,10 @@ header .content {
 
 .index h1 {
     margin: 0;
+}
+
+.index h1.has-subtitle {
+    white-space: nowrap;
 }
 
 h1.has-subtitle small {
@@ -357,35 +364,61 @@ button {
     text-decoration: underline;
 }
 
-/* Navigation wrapping + mobile */
-nav ul {
-    flex-wrap: wrap;
-    row-gap: .4em;
-}
-
+/* Mobile */
 @media (max-width: 41.99em) {
     body {
         overflow-x: hidden;
     }
+
+    /* Hamburger dropdown */
+    .nav-toggle {
+        display: inline-flex;
+    }
+    .nav-menu {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 1em;
+        flex-direction: column;
+        gap: 0;
+        min-width: 9.5em;
+        background: var(--color-canvas-subtle);
+        border: 1px solid var(--color-border-default);
+        border-radius: 8px;
+        padding: .35em 0;
+        z-index: 20;
+    }
+    .nav-menu.open {
+        display: flex;
+    }
+    .nav-menu a {
+        display: block;
+        padding: .55em 1.1em;
+    }
+
+    /* Centered, condensed header */
     .index .header-inner {
         display: block;
+        text-align: center;
     }
     .index h1.has-subtitle {
         font-size: 1em;
     }
     .index .has-subtitle span {
-        font-size: 2.3em;
+        font-size: 1.9em;
     }
     header .content {
         margin-top: 1.5em;
     }
-    nav ul {
-        margin: 1em 0;
-        font-size: .8em;
+    .content {
+        padding-left: 1.4rem;
+        padding-right: 1.4rem;
     }
-    nav li {
-        margin-right: .6em;
+    .card-container {
+        padding-left: 1.4rem;
+        padding-right: 1.4rem;
     }
+
     .prose h2 {
         font-size: 1.05rem;
     }
