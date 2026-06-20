@@ -1,18 +1,24 @@
-# personal-website
+# raccoon-42.github.io
 
-Personal portfolio site for Ali Özkaya, a static page with a light/dark theme,
-project links, and a downloadable CV.
+Personal portfolio site for Ali Özkaya. Static, multi-page, with a light/dark
+theme, responsive mobile nav, project links, and a downloadable CV.
 
 Live: https://raccoon-42.github.io/
 
 ## Structure
 
 ```
-index.html            # the page
+index.html            # home (projects list)
+about.html            # about / bio
+projects.html         # projects detail
+404.html              # on-brand not-found page (GitHub Pages serves this)
+sitemap.xml           # search-engine sitemap
+robots.txt            # crawler rules + sitemap pointer
 assets/
   css/                # style.css + hover/starfield/project-card styles
-  js/theme.js         # light/dark theme toggle
+  js/theme.js         # light/dark theme toggle + mobile nav
   img/                # profile photo + icons
+  og.png, favicon.*   # link-preview and favicons
   Ali_Ozkaya_CV.pdf   # downloadable CV (auto-synced, see below)
 scripts/sync-cv.sh    # copies ~/cv/cv.pdf into assets/ before each commit
 ```

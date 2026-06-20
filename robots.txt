@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://raccoon-42.github.io/sitemap.xml
