@@ -1,0 +1,13 @@
+# Jekyll is enabled only so the shared nav/footer can live in _includes/ and be
+# pulled into each page with {% include %}. Pages stay plain HTML with empty
+# front matter; no layouts, no markdown conversion, no plugins.
+title: CodeSpace by Ali
+url: https://raccoon-42.github.io
+
+# keep dev/tooling files out of the built site
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .jekyll-cache
+  - README.md

@@ -4,3 +4,10 @@
 # Editor / OS junk
 *~
 Thumbs.db
+
+# Jekyll (local build / preview)
+_site/
+.jekyll-cache/
+.jekyll-metadata
+vendor/
+Gemfile.lock
