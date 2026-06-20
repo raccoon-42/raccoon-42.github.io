@@ -24,7 +24,7 @@ out vec4 outColor;
 
 // ---------------------------------------------------------------- tunables --
 const float HOLE_RADIUS   = 0.06;    // shadow radius as a fraction of screen height
-const float LENS_DEPTH    = 20.0;    // how hard the background text bends
+const float LENS_DEPTH    = 1000.0;    // how hard the background text bends
 const float INTENSITY     = 0.06;    // 0 = fast disk, 1 = slow/dilated, massive feel
 const float DRIFT_AMT     = 0.045;   // hole wander: makes the bent text ripple
 const float DILATION_MIN  = 0.20;    // disk pattern rate at full INTENSITY
