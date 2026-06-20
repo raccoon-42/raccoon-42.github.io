@@ -8,19 +8,22 @@ Live: https://raccoon-42.github.io/
 ## Structure
 
 ```
-index.html            # home (projects list)
-about.html            # about / bio
-projects.html         # projects detail
-404.html              # on-brand not-found page (GitHub Pages serves this)
-sitemap.xml           # search-engine sitemap
-robots.txt            # crawler rules + sitemap pointer
+index.html              # home (projects list)
+about.html              # about / bio
+projects.html           # projects detail
+drawings.html           # art gallery (generated)
+404.html                # on-brand not-found page (GitHub Pages serves this)
+sitemap.xml             # search-engine sitemap
+robots.txt              # crawler rules + sitemap pointer
 assets/
-  css/                # style.css + hover/starfield/project-card styles
-  js/theme.js         # light/dark theme toggle + mobile nav
-  img/                # profile photo + icons
-  og.png, favicon.*   # link-preview and favicons
-  Ali_Ozkaya_CV.pdf   # downloadable CV (auto-synced, see below)
-scripts/sync-cv.sh    # copies ~/cv/cv.pdf into assets/ before each commit
+  css/                  # style.css + hover/starfield/project-card/drawings styles
+  js/                   # theme.js (theme + mobile nav), drawings.js (lightbox)
+  img/                  # profile photo + icons
+  img/drawings/         # gallery images (generated copy, do not edit by hand)
+  og.png, favicon.*     # link-preview and favicons
+  Ali_Ozkaya_CV.pdf     # downloadable CV (auto-synced, see below)
+scripts/sync-cv.sh      # copies ~/cv/cv.pdf into assets/ before each commit
+scripts/build-drawings.py  # regenerates drawings.html from a local source folder
 ```
 
 ## CV sync
