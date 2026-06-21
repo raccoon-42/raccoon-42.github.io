@@ -19,6 +19,10 @@ precision highp int;
 uniform vec3      iResolution;
 uniform float     iTime;
 uniform vec2      iCursor;      // eased pull of the hole center toward the cursor (uv offset; 0 = none). set in blackhole.js
+uniform float     iDiskTime;    // disk-streak clock: like iTime but sped up on click/hold (set in blackhole.js)
+uniform float     iMass;        // hole size multiplier; grows as you "feed" it (set in blackhole.js; 1 = baseline)
+uniform float     iFlare;       // disk luminosity multiplier; rises as you feed (1 = baseline). set in blackhole.js
+uniform float     iInflow;      // feeding: drives the inward pull (disk matter spirals inward toward the shadow). set in blackhole.js
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -40,6 +44,9 @@ const float WARP_LEAN     = 0.5;     // shear the text warp so it leans with the
 // cycle before being renewed, hidden at the crossfade. shears like a real disk,
 // never winds, never pops.
 const float DISK_CYCLE     = 8.0;    // seconds per renewal cycle (lower = crisper + more boil, higher = more shear)
+const float INFALL_K       = 2.5;    // feeding: how fast the disk's matter spirals inward toward the shadow (0 = orbit only)
+const float TEMP_BLUE      = 0.12;   // feeding: how much hotter/bluer the disk runs as accretion rises (real: higher rate -> higher temp)
+const float DOPP_COLOR     = 2.0;    // exaggerate the Doppler/grav shift on color so red (receding) / blue (approaching) shows at this temp
 #define N_STEPS 36                    // geodesic integration steps per near-field pixel
 #define B_CRIT 2.5980762              // critical impact parameter (shadow radius), in r_s
 
@@ -59,7 +66,7 @@ const DiskLook PURELENS  = DiskLook( 5500.0, 1.50,  0.35, 1.8,  8.0, 0.00, 1.00,
 const DiskLook ZEN       = DiskLook( 7000.0, 1.45,  0.15, 3.5,  7.0, 0.40, 0.50, 2.0, 0.5, 0.3, 3.0, 1.5, 0.70, 0.0);
 
 // >>> pick the look here <<<
-#define PRESET QUASAR
+#define PRESET M87
 
 // ------------------------------------------------------------------- noise --
 float hash21(vec2 p) {
@@ -110,10 +117,10 @@ vec3 blackbody(float T) {
 // ray, so stars smear into arcs around the hole for free
 vec3 stars(vec3 d) {
     vec2 sph = vec2(atan(d.x, -d.z), asin(clamp(d.y, -1.0, 1.0)));
-    vec2 g   = sph * 40.0;
+    vec2 g   = sph * 55.0;
     vec2 id  = floor(g);
     float h  = hash21(id);
-    if (h < 0.92) return vec3(0.0);
+    if (h < 0.86) return vec3(0.0);
     vec2 f   = fract(g) - 0.5;
     vec2 off = (vec2(hash21(id + 17.3), hash21(id + 31.7)) - 0.5) * 0.7;
     float spark = smoothstep(0.10, 0.0, length(f - off));
@@ -131,13 +138,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     DiskLook L = PRESET;
     L.star = STAR_OVERRIDE;
+    L.temp *= 1.0 + (iFlare - 1.0) * TEMP_BLUE;   // accretion heats the disk -> bluer when fed
 
     float rin  = max(L.inner, 1.6);
     float rout = max(L.outer, rin + 0.5);
 
     // fixed, centered hole (no pomodoro / token modes)
     float I      = INTENSITY;
-    float sz     = 1.0;
+    float sz     = iMass;   // 1 = baseline; >1 = fed/heavier, grows shadow + disk + lensing together
     vec2  center = vec2(0.5, 0.5) + DRIFT_AMT * lissa(t * 0.15) + iCursor;
 
     float rh     = HOLE_RADIUS * sz;       // shadow radius in screen units
@@ -180,7 +188,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             term[i]   = texture(iChannel0, suv)[i];
         }
         vec3 d = normalize(vec3(-(pr / b) * (2.0 / b), -1.0));
-        fragColor = vec4(term + stars(d) * L.star * window * shield, 1.0);
+        fragColor = vec4(term + stars(d) * L.star * shield, 1.0);
         return;
     }
 
@@ -237,15 +245,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 float rateS = kep * spd * gloc * dil * sdir;
                 // two copies advected by that rate but offset half a cycle; the
                 // crossfade weight is 0 at each copy's reset, hiding the renewal
-                float ph1   = fract(t / DISK_CYCLE);
-                float ph2   = fract(t / DISK_CYCLE + 0.5);
+                float ph1   = fract(iDiskTime / DISK_CYCLE);
+                float ph2   = fract(iDiskTime / DISK_CYCLE + 0.5);
                 float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
                 float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
                 float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
-                float st1   = vnoiseWrapY(vec2(rc * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
-                              vnoiseWrapY(vec2(rc * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
-                float st2   = vnoiseWrapY(vec2(rc * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
-                              vnoiseWrapY(vec2(rc * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
+                // feeding drifts the streak pattern inward in radius -> matter spirals
+                // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
+                float rcN   = rc + iInflow * INFALL_K;
+                float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
+                float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
                 float streaks = mix(st2, st1, wx);
                 streaks = 0.35 + L.contr * streaks * streaks;
 
@@ -257,7 +268,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
                 float xpr   = max(1.0 - sqrt(rin / rc), 0.0);
                 float tprof = pow(rin / rc, 0.75) * pow(xpr, 0.25) / 0.488;
-                vec3  cbb   = blackbody(L.temp * tprof * g);
+                vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
                 float boost = pow(g, L.beam);
 
                 float density = band * streaks;
@@ -274,7 +285,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 bg = vec3(0.0);
     if (!captured) {
         vec3 d = normalize(v);
-        bg += stars(d) * L.star * window * shield;
+        bg += stars(d) * L.star * shield;
         if (d.z < -0.05) {
             // project the straight exit ray onto the lens plane at z = -LENS_DEPTH
             float tpl = (-LENS_DEPTH - x.z) / d.z;
@@ -293,7 +304,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         }
     }
 
-    // disk light is HDR; tonemap it over the background
+    // feeding brightens the disk (accretion flare); HDR, then tonemap over the bg
+    emitc *= iFlare;
     vec3 col = bg * trans + (vec3(1.0) - exp(-emitc * L.expo));
     fragColor = vec4(col, 1.0);
 }
