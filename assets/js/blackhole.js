@@ -16,6 +16,8 @@
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const MAXQ = 2; // render resolution cap; full device pixels so it's sharp at 100% zoom
+  const CURSOR_PULL = 0.7;  // how far the hole drifts toward the cursor (0 = ignore, 1 = all the way there)
+  const CURSOR_EASE = 0.002; // how fast it eases toward the cursor (gravitational lag); lower = slower drift
 
   // the field of text the hole bends. lowercase, no em-dashes (house style).
   // a page can override the copy via window.BLACKHOLE_LINES (e.g. /void.html);
@@ -49,7 +51,8 @@ void main() {
   }
 
   const B_CRIT = 2.5980762;  // shadow radius in r_s; matches the shader
-  let prog, uRes, uTime, tex, raf = 0, startT = 0;
+  let prog, uRes, uTime, uCursor, tex, raf = 0, startT = 0;
+  let pullX = 0, pullY = 0, tgtPullX = 0, tgtPullY = 0; // hole's eased drift toward the cursor (uv offset)
   let cfg = null;            // shader constants parsed from the frag (kept in sync)
   let navItems = [];         // nav links + their natural-position uv, for click tracking
   const tcvs = document.createElement('canvas');
@@ -141,8 +144,8 @@ void main() {
     if (!cfg || !navItems.length) return;
     const W = window.innerWidth, H = window.innerHeight, aspect = W / H;
     const s = time * cfg.driftSpeed * 0.15;
-    const cx = 0.5 + cfg.driftAmt * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0));
-    const cy = 0.5 + cfg.driftAmt * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07));
+    const cx = 0.5 + cfg.driftAmt * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX;
+    const cy = 0.5 + cfg.driftAmt * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY;
     const rh = cfg.holeR, Wm = B_CRIT / Math.max(rh, 1e-4);
     const Z0 = Math.max(14, cfg.rout + 5), bmax = cfg.rout + 3;
     for (let i = 0; i < navItems.length; i++) {
@@ -155,7 +158,7 @@ void main() {
       if (b >= bmax) {
         const u = Z0 / Math.sqrt(Z0 * Z0 + b * b);
         const defl = (2 / (Wm * Wm)) / plen * (1.29 * u + 0.07) *
-                     Math.max(cfg.lensDepth - 2.14 * u + 0.75, 0) * win;
+          Math.max(cfg.lensDepth - 2.14 * u + 0.75, 0) * win;
         dx = (px / plen) * defl - cfg.warpLean * py * win;
         dy = (py / plen) * defl;
       }
@@ -178,6 +181,7 @@ void main() {
     gl.useProgram(prog);
     uRes = gl.getUniformLocation(prog, 'iResolution');
     uTime = gl.getUniformLocation(prog, 'iTime');
+    uCursor = gl.getUniformLocation(prog, 'iCursor');
     gl.bindVertexArray(gl.createVertexArray());
 
     tex = gl.createTexture();
@@ -197,6 +201,11 @@ void main() {
     resize();
     window.addEventListener('resize', onResize);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pointermove', onPointer);   // mouse hover + finger drag
+    window.addEventListener('pointerdown', onPointer);   // a still touch-hold pulls too (no move needed)
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
+    document.addEventListener('mouseleave', onMouseLeave); // desktop: ease back when the cursor leaves
     start();
   }
 
@@ -216,7 +225,10 @@ void main() {
   function render(nowMs) {
     if (!startT) startT = nowMs;
     const t = (nowMs - startT) / 1000;
+    pullX += (tgtPullX - pullX) * CURSOR_EASE;
+    pullY += (tgtPullY - pullY) * CURSOR_EASE;
     gl.uniform1f(uTime, t);
+    gl.uniform2f(uCursor, pullX, pullY);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     navUpdate(t);
     raf = requestAnimationFrame(render);
@@ -226,6 +238,7 @@ void main() {
     cancelAnimationFrame(raf);
     if (reduceMotion) {
       gl.uniform1f(uTime, 8.0); // one composed static frame
+      gl.uniform2f(uCursor, pullX, pullY);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       navUpdate(8.0);
     } else {
@@ -247,6 +260,18 @@ void main() {
       start();
     }
   }
+
+  // the hole drifts toward the pointer (cursor, or a held touch), eased in render;
+  // releasing/leaving eases it back to the autonomous wander. nav-link tracking
+  // uses the same pull (see navUpdate).
+  function onPointer(e) {
+    tgtPullX = (e.clientX / window.innerWidth - 0.5) * CURSOR_PULL;
+    tgtPullY = (e.clientY / window.innerHeight - 0.5) * CURSOR_PULL;
+  }
+  // touch/pen: ease back when the finger lifts. mouse keeps its last position (it
+  // still has a cursor on screen); the desktop reset is mouseleave instead.
+  function onPointerEnd(e) { if (e.pointerType !== 'mouse') { tgtPullX = 0.0; tgtPullY = 0.0; } }
+  function onMouseLeave() { tgtPullX = 0.0; tgtPullY = 0.0; }
 
   fetch('/assets/shaders/blackhole.frag')
     .then(function (r) { return r.text(); })

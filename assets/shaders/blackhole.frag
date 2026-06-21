@@ -18,6 +18,7 @@ precision highp int;
 
 uniform vec3      iResolution;
 uniform float     iTime;
+uniform vec2      iCursor;      // eased pull of the hole center toward the cursor (uv offset; 0 = none). set in blackhole.js
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -31,6 +32,14 @@ const float DILATION_MIN  = 0.20;    // disk pattern rate at full INTENSITY
 const float STAR_OVERRIDE = 0.0;     // text field is the background now, no procedural stars
 const float DRIFT_SPEED   = 1.0;
 const float WARP_LEAN     = 0.5;     // shear the text warp so it leans with the tilted hole (0 = mirror-symmetric)
+// disk streak motion. a static streak noise advected by the per-radius Keplerian
+// rate winds into ever-finer spirals that alias to a static blur within ~a minute
+// (looks like the disk "freezes"). real disks don't, because their turbulence is
+// continuously renewed. so advect at the true Keplerian rate but cross-dissolve
+// two copies offset by half a cycle (van Wijk / flow-map): each only shears for a
+// cycle before being renewed, hidden at the crossfade. shears like a real disk,
+// never winds, never pops.
+const float DISK_CYCLE     = 8.0;    // seconds per renewal cycle (lower = crisper + more boil, higher = more shear)
 #define N_STEPS 36                    // geodesic integration steps per near-field pixel
 #define B_CRIT 2.5980762              // critical impact parameter (shadow radius), in r_s
 
@@ -129,7 +138,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // fixed, centered hole (no pomodoro / token modes)
     float I      = INTENSITY;
     float sz     = 1.0;
-    vec2  center = vec2(0.5, 0.5) + DRIFT_AMT * lissa(t * 0.15);
+    vec2  center = vec2(0.5, 0.5) + DRIFT_AMT * lissa(t * 0.15) + iCursor;
 
     float rh     = HOLE_RADIUS * sz;       // shadow radius in screen units
     float dil    = mix(1.0, DILATION_MIN, I);
@@ -224,9 +233,20 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 float turns = phi / 6.2831853;
                 float kep   = pow(rin / rc, 1.5);
                 float gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
-                float swirl = rc * L.wind * 0.12 - t * kep * spd * gloc * dil * sdir;
-                float streaks = vnoiseWrapY(vec2(rc * 2.8, turns * 19.0 + swirl * 3.0), 19.0) * 0.65 +
-                                vnoiseWrapY(vec2(rc * 1.0, turns * 9.0  + swirl * 1.5 + 7.0), 9.0) * 0.35;
+                // true Keplerian advection rate (inner orbits faster), signed
+                float rateS = kep * spd * gloc * dil * sdir;
+                // two copies advected by that rate but offset half a cycle; the
+                // crossfade weight is 0 at each copy's reset, hiding the renewal
+                float ph1   = fract(t / DISK_CYCLE);
+                float ph2   = fract(t / DISK_CYCLE + 0.5);
+                float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
+                float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
+                float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
+                float st1   = vnoiseWrapY(vec2(rc * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rc * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
+                float st2   = vnoiseWrapY(vec2(rc * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rc * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
+                float streaks = mix(st2, st1, wx);
                 streaks = 0.35 + L.contr * streaks * streaks;
 
                 // relativistic Doppler + gravitational shift
