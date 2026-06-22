@@ -78,6 +78,21 @@
   // direction, with no gimbal lock / cross-coupling (that was the "wanders off direction").
   const GYRO_G_RANGE = 3.5;   // LEFT/RIGHT: gravity component (m/s^2) that maps to the full GYRO_MAX (~21 deg of tilt: 9.81*sin21). lower = more sensitive
   const GYRO_G_RANGE_Y = 2.0; // FORWARD/BACK gets its own, smaller (more sensitive) range: held at a viewing angle, the vertical gravity component changes much less per degree of fwd/back tilt than left/right roll does, so vertical felt weak/asymmetric. lower = more sensitive
+  // STABILITY: the raw gravity vector jitters (hand tremor, sensor noise, the shake feed
+  // bleeding into it) -> the tilt felt "unstable". low-pass it into a steady gravity
+  // estimate BEFORE deriving the tilt, so only deliberate tilts move the marble. this is
+  // the accelerometer half of the sensor fusion (the gyro/ease handles short-term lag).
+  const GRAV_LP = 0.86;       // gravity low-pass weight (kept fraction of the previous estimate per reading). higher = steadier but laggier tilt; lower = snappier but jitterier. 0 = raw (no smoothing)
+  // SHOVE: physically flicking/sliding the phone -- the GRAVITY-REMOVED linear acceleration
+  // (e.acceleration) -- knocks the hole with a transient push that springs back, like a
+  // heavy mass you can shove. separate from the tilt roll and from the shake feed.
+  const SHOVE_GAIN = 0.011;   // uv velocity kicked into the hole per m/s^2 of linear accel above the deadzone. higher = a flick throws the hole harder
+  const SHOVE_DRAG = 0.84;    // per-frame damping on the shove velocity (lower = the knock dies quicker, less coast)
+  const SHOVE_RETURN = 0.90;  // per-frame spring of the shoved offset back to center (lower = snaps home faster; this is what makes it "settle back")
+  const SHOVE_MAX = 0.28;     // cap on the shove offset (uv) so a hard flick can't fling the hole off-screen
+  const SHOVE_DEAD = 1.5;     // m/s^2 of linear accel below which it's ignored: a still/slightly-trembling hand reads ~0-2 per axis, so this rejects rest noise and only a deliberate flick (~5-15+) shoves -> no jitter
+  const SHOVE_SIGN_X = 1.0;   // flip to -1 if a left/right flick shoves the hole the wrong way
+  const SHOVE_SIGN_Y = 1.0;   // flip to -1 if an up/down flick shoves the hole the wrong way
   // shaking the phone feeds the hole like holding: linear acceleration (gravity removed)
   // spikes on a shake; while the smoothed level stays above threshold it pours mass in.
   const SHAKE_THRESH = 7.0;   // m/s^2 of linear accel above which it counts as "shaking" (a deliberate shake is ~10-25, a still hand ~0-2)
@@ -150,6 +165,9 @@ void main() {
   let gyroBeta0 = null, gyroGamma0 = null;             // orientation-fallback neutral tilt baseline (only used if devicemotion gives no gravity)
   let gravX0 = null, gravY0 = null, motionActive = false; // gravity-vector neutral baseline + whether devicemotion is driving the direction
   let gyroWarm = 0;                                    // readings since gyro woke: the baseline settles fast for the first few so the activation-tap pose isn't frozen in as a lopsided "neutral"
+  let gravLpX = 0, gravLpY = 0, gravLpInit = false;   // low-pass gravity estimate (steady tilt source -- raw gravity is too jittery)
+  let accPkX = 0, accPkY = 0;                          // peak linear-accel sample since last frame (gravity removed), consumed by the shove
+  let shoveX = 0, shoveY = 0, shoveVX = 0, shoveVY = 0; // shove offset + velocity: a phone flick knocks the hole, it springs back
   let shakeLevel = 0, shaking = false;                 // smoothed shake intensity (linear accel) + whether it's feeding the hole like a hold
   let gyroActive = false, gyroRequested = false, gyroPending = false; // gyro receiving data / iOS permission answered (one-shot) / request in flight
   const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
@@ -275,8 +293,8 @@ void main() {
   function holeCenterUV(time) {
     const s = time * cfg.driftSpeed * 0.15;
     return {
-      x: 0.5 + cfg.driftAmt * driftScale * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX + gyroX,
-      y: 0.5 + cfg.driftAmt * driftScale * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY + gyroY,
+      x: 0.5 + cfg.driftAmt * driftScale * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX + gyroX + shoveX,
+      y: 0.5 + cfg.driftAmt * driftScale * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY + gyroY + shoveY,
     };
   }
 
@@ -553,6 +571,18 @@ void main() {
     gyroY += (gyroTY - gyroY) * GYRO_EASE;
     driftScale += ((gyroActive ? 0.0 : 1.0) - driftScale) * 0.04;
 
+    // linear-acceleration SHOVE: a flick/slide of the phone (gravity-removed accel, peak-held
+    // since the last frame) kicks the shove velocity; drag bleeds it and a spring returns the
+    // offset to center -> the hole lurches with the motion then settles, a heavy knock. the
+    // deadzone means a steady hand never shoves (stability). this rides ON TOP of the tilt roll.
+    const adx = Math.abs(accPkX) > SHOVE_DEAD ? accPkX : 0.0;
+    const ady = Math.abs(accPkY) > SHOVE_DEAD ? accPkY : 0.0;
+    accPkX = 0; accPkY = 0;                                   // consume this frame's flick peak
+    shoveVX = shoveVX * SHOVE_DRAG + SHOVE_SIGN_X * adx * SHOVE_GAIN;
+    shoveVY = shoveVY * SHOVE_DRAG + SHOVE_SIGN_Y * ady * SHOVE_GAIN;
+    shoveX = Math.max(-SHOVE_MAX, Math.min((shoveX + shoveVX) * SHOVE_RETURN, SHOVE_MAX));
+    shoveY = Math.max(-SHOVE_MAX, Math.min((shoveY + shoveVY) * SHOVE_RETURN, SHOVE_MAX));
+
     // shaking the phone feeds the hole like a hold (Ali: "shaking should act same as
     // holding"). the shake level coasts down (SHAKE_TAU) between shake peaks so the fast
     // oscillation reads as one sustained feed, and stopping collapses like a release.
@@ -634,7 +664,7 @@ void main() {
     szEff *= (1.0 + wobSwell);           // the impact swell deepens the lensing
 
     gl.uniform1f(uTime, t);
-    gl.uniform2f(uCursor, pullX + wobX + gyroX, pullY + wobY + gyroY);
+    gl.uniform2f(uCursor, pullX + wobX + gyroX + shoveX, pullY + wobY + gyroY + shoveY);
     gl.uniform1f(uDiskTime, diskTime);
     gl.uniform1f(uDriftScale, driftScale);
     gl.uniform1f(uMass, szEff);
@@ -832,21 +862,27 @@ void main() {
     const g = e.accelerationIncludingGravity;
     if (g && g.x != null && g.y != null) {
       motionActive = true; gyroActive = true;             // onOrient steps aside, drift fades out
-      if (gravX0 == null) { gravX0 = g.x; gravY0 = g.y; } // capture the neutral hold pose
+      // low-pass the gravity vector into a steady estimate -> the tilt reads off the smoothed
+      // gravity, not the jittery raw sample, so a still hand holds still (kills the instability).
+      if (!gravLpInit) { gravLpX = g.x; gravLpY = g.y; gravLpInit = true; }
+      else { gravLpX = GRAV_LP * gravLpX + (1 - GRAV_LP) * g.x; gravLpY = GRAV_LP * gravLpY + (1 - GRAV_LP) * g.y; }
+      if (gravX0 == null) { gravX0 = gravLpX; gravY0 = gravLpY; } // capture the neutral hold pose
       // the gyro wakes from the activation tap/swipe -- the phone is moving at that instant, so
       // the first reading is a bad "neutral". settle the baseline fast for ~0.5s (it averages the
       // real resting pose, keeping left/right reach symmetric), THEN lock to the tiny recenter.
       const rc = gyroWarm < 30 ? 0.08 : GYRO_RECENTER;
       gyroWarm++;
-      gravX0 += (g.x - gravX0) * rc;                      // settle, then slowly forget a sustained tilt
-      gravY0 += (g.y - gravY0) * rc;
-      gyroTX = clamp1(GYRO_SIGN_X * deadzone((g.x - gravX0) / GYRO_G_RANGE)) * GYRO_MAX;
-      gyroTY = clamp1(GYRO_SIGN_Y * deadzone((g.y - gravY0) / GYRO_G_RANGE_Y)) * GYRO_MAX;
+      gravX0 += (gravLpX - gravX0) * rc;                  // settle, then slowly forget a sustained tilt
+      gravY0 += (gravLpY - gravY0) * rc;
+      gyroTX = clamp1(GYRO_SIGN_X * deadzone((gravLpX - gravX0) / GYRO_G_RANGE)) * GYRO_MAX;
+      gyroTY = clamp1(GYRO_SIGN_Y * deadzone((gravLpY - gravY0) / GYRO_G_RANGE_Y)) * GYRO_MAX;
     }
-    const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake
+    const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake/flick
     if (a && a.x != null) {
       const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
       if (mag > shakeLevel) shakeLevel = mag;             // peak-hold; render() coasts it down (SHAKE_TAU)
+      if (a.x != null && Math.abs(a.x) > Math.abs(accPkX)) accPkX = a.x; // peak-hold the flick for the shove
+      if (a.y != null && Math.abs(a.y) > Math.abs(accPkY)) accPkY = a.y; // (render consumes + zeroes these)
     }
   }
   function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
