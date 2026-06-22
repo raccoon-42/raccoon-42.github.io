@@ -15,6 +15,7 @@
   if (!gl) return; // no WebGL2: leave the CSS fallback background in place
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isCoarse = window.matchMedia('(pointer: coarse)').matches; // mobile/touch: gyro target + calmer ripple
   const MAXQ = 2; // render resolution cap; full device pixels so it's sharp at 100% zoom
   const CURSOR_PULL = 0.7;   // how far toward the pointer the hole reaches (0 = ignore, 1 = all the way)
   const PULL_FOLLOW = 0.0005;  // mouse: how tightly the hole tracks the cursor while hovering (very slow, heavy gravitational lag)
@@ -22,30 +23,73 @@
   const PULL_DAMP = 10.0;     // touch: damping (>~2*sqrt(STIFF) = no springback, just a heavy sluggish catch-up)
   const PULL_COAST = 3.5;      // touch: after release, how fast the coasting hole slows to rest (per second)
   const PULL_FRICTION = 0.90;  // mouse: on release it coasts on its last velocity, slowing to a stop where it lands
-  const DISK_SPEED_K = 0.9; // the whirl fastens exponentially with mass while held: speed = e^(K*(mass-1)) (gentle, then ramps up)
+  const DISK_SPEED_K = 0.0; // the whirl fastens exponentially with mass while held: speed = e^(K*(mass-1)) (gentle, then ramps up)
+  const DISK_SPEED_MAX = 6.5; // cap on that whirl: past this the streak advection aliases per frame and the spin flickers. ~the old MASS_MAX=3 top speed, kept smooth now that mass can reach 10
   const FEED_TAP = 0.15; // size the hole gains per press (a tap of mass)
   const FEED_RATE = 0.8;  // extra size per second while a press is held (pouring mass in)
-  const MASS_MAX = 3.0;  // hard cap on the size multiplier (how big it can ever get)
-  const MASS_DECAY = 0.1;  // on release, how fast the accumulated mass falls back to baseline (high = quick zoom-back)
-  const MASS_EASE = 0.08; // how smoothly the visible size follows the accumulated mass
+  const MASS_MAX = 4.0;  // hard cap on the size multiplier (how big it can ever get)
+  const MASS_COLLAPSE_DUR = 0.34; // release collapse: how long (s) the swift snap back to baseline takes (lower = faster "phiiuuuv")
+  const MASS_COLLAPSE_EXP = 3.6;  // shape of that snap: an accelerating e^x curve (0 = linear; higher = more back-loaded -- hangs, then rushes home)
+  const MASS_EASE = 0.08; // while held, how smoothly the visible size follows the accumulated mass (the gentle pour-in feel; release uses the collapse animation)
   const MASS_SIZE_K = 0.5; // the event horizon largens exponentially with mass: size = e^(K*(mass-1)) (higher = the zoom accelerates sooner/harder)
   const MASS_LUM_K = 0.7; // feeding brightens + heats the disk (bluer, via the shader's TEMP_BLUE): flare = e^(K*(mass-1)) (lower = reaches white more gradually)
   const VIEW_FIT = 0.8;  // responsive base size: zoom the hole out on narrow/portrait screens so the event horizon has margin (mobile); wide screens clamp to 1.0 (unaffected)
   const VIEW_MIN = 0.33; // floor for that base size (never smaller than this fraction)
   const VIEW_MAX = 0.6;  // ceiling: wide/desktop screens cap here (was 1.0) so the hole isn't too zoomed -- leaves room to see beyond the event horizon
+  const EH_ZOOM_REF = 0.07; // desktop: shadow screen-height fraction below which no extra zoom-out (compact-disk presets already sit small; QUASAR/BLAZAR are ~0.05-0.06)
+  const EH_ZOOM_K = 3.5;    // desktop: how hard a WIDER event horizon is zoomed out -> presetScale /= 1 + this*(shadowFrac - EH_ZOOM_REF). bigger = the wide-shadow looks (M87, GARGANTUA) zoom out more; 0 = off (disk-normalized only)
   const INFLOW_SPEED = 0.6;  // how fast the disk's matter spirals inward while you hold (drives INFALL_K in the shader; 0 = off)
-  const INFLOW_RELAX = 0.97; // when released, how fast that inward pull eases back out (per frame)
+  const INFLOW_RELAX = 0.85; // when released, how fast that inward pull eases back out (per frame). fast enough to fully ease out within a collapse, so it can't accumulate across rapid hold-releases -- and it's a SMOOTH ease, never a hard reset (which jumps the streak radius)
   const WOBBLE_AMP = 0.085; // changing the hole "drops it onto the screen": base drop (uv), scaled by the hole's mass
-  const WOBBLE_OMEGA = 9.5;   // base natural frequency (rad/s); divided by sqrt(mass) so heavy holes wobble slower (inertia)
+  const WOBBLE_OMEGA = 3.7;   // base natural frequency (rad/s); divided by sqrt(mass) so heavy holes wobble slower (inertia)
   const WOBBLE_ZETA = 0.16;  // damping ratio: low = keeps shaking (several decaying oscillations) after a swipe; ~cycles before settling = 0.37/this
   const WOBBLE_SIZE = 0.18;  // on impact the hole swells this much, deepening the gravity well (spacetime bend felt), relaxing with the wobble
   const RIPPLE_FEED_K = 1.3; // feeding shakes the spacetime fabric: vibration = 1 - e^(-(mass-1)*this), saturating as you feed (0 = only the wobble ripples)
-  const RIPPLE_VEL_K = 0.25; // the size *changing* shakes it too; the fast snap-back on release is the biggest change, so it ripples hardest
-  const REL_RIP_GAIN = 0.7;  // on release the hole returns smoothly but the spacetime FABRIC keeps rippling: kick = (fed mass - 1) * this (bigger feed -> bigger ripple)
-  const REL_RIP_DECAY = 0.997;// how slowly that release ripple fades (per frame; closer to 1 = longer train of fabric oscillations)
-  const REL_RIP_MAX = 1.6;   // cap on the release ripple kick
+  const RIPPLE_VEL_K = 0.15; // the size *changing* shakes it too; the fast snap-back on release is the biggest change, so it ripples hardest
+  const REL_RIP_GAIN = 4.0;   // the release ring's strength at a FULL hold (fed mass = MASS_MAX). strength ramps linearly from ~0 at a tap to this at a full hold, so a longer hold rings proportionally HARDER (no early saturation). capped at REL_RIP_MAX.
+  const REL_RIP_TAU = 1.0;    // release ringdown time-constant (s) for a light tap: the ring's amplitude decays as exp(-dt/tau) (dt-based, so frame-rate independent). higher = longer ring even for a tap.
+  const REL_RIP_TAU_K = 1.5;  // a longer hold (more fed mass) rings LONGER: tau = REL_RIP_TAU * (1 + this*(fedMass-1)). physical: heavier holes ring down slower (tau ~ M). 0 = same duration regardless of hold.
+  const REL_RIP_MAX = 4.0;   // hard cap on the release ripple kick (safety ceiling; the ramp above already reaches REL_RIP_GAIN at a full hold)
+  const REL_RIP_FREQ = 1.2;  // the release ring rings at a LOWER frequency than feeding -> fewer, bigger, slower fabric waves you can actually feel roll out on release (multiplies the ring's frequency; <1 = lower/slower, 1 = same as feed)
+  const RIPPLE_CAP = 4.3;    // overall ceiling on the summed fabric ripple sent to the shader. kept above REL_RIP_MAX so the release ring (the only term this big) passes unclipped; feeding terms top out ~2
+  const MOBILE_RIPPLE = 0.85; // mobile: scale the fabric ripple (was 0.5 for nausea, but big-hole rings then read as nothing; the release ring is now proportional to hold so short taps stay calm). lower again toward 0.5 if heavy holds feel sickening on a phone
+  const DESKTOP_RIPPLE = 1.2; // desktop: scale the ripple UP -> heavier, stronger fabric (bigger displacement). mobile uses MOBILE_RIPPLE instead
+  const DESKTOP_RIP_FREQ = 0.7; // desktop: lower the ripple frequency -> bigger, slower, more ponderous (heavier) waves. 1.0 = same coarseness as mobile
+  const RIP_EASE = 0.3;      // low-pass on the ripple sent to the shader so it can't STEP in a single frame: kills the instant ring jolt on first click (the feed-velocity spike) while still letting the release ring swell quickly
+  const SILENCE_EASE = 0.15; // how fast the feed ripple ramps back IN when a collapse is interrupted by a new click (lower = gentler ramp). silence snaps on at collapse start, eases off here
+  const RIP_MASS_K = 0.5;    // how strongly a heavier hole lowers the ripple frequency -> freqScale = 1/(1 + this*(fedMass-1)). bigger feed = fewer, slower, more ponderous rings (physical: f ~ 1/M; this=1 is exact 1/M, lower is gentler). 0 = fixed frequency. applies on desktop AND mobile.
   const DISK_WOB_W = 1.3;    // the disk nods with the wobble's shake (radians of inclination per unit wobble offset)
   const DISK_WOB_V = 7.0;    // the disk nods with the hole's drag velocity (radians per unit per-frame motion)
+
+  // gyroscope "marble in a bowl" drift (mobile): tilt the phone and the heavy hole
+  // rolls toward the low edge. tilt feeds a bounded target; the hole eases toward it
+  // with the same heavy gravitational lag (no snap, no bounce). a slow baseline
+  // recenter keeps a sustained tilt from parking the hole off-screen. this composes
+  // ON TOP of the finger pull and, while live, replaces the autonomous sin-drift.
+  const GYRO_MAX = 0.15;      // max uv offset a tilt can push the hole (keeps the disk on-screen)
+  const GYRO_RANGE = 32.0;    // degrees of tilt from baseline that map to the full GYRO_MAX
+  const GYRO_EASE = 0.05;     // how heavily the hole rolls toward the tilt target (low = laggier, heavier marble)
+  const GYRO_RECENTER = 0.004;// per-reading drift of the neutral baseline toward the held angle (0 = never recenter; higher = forgets a held tilt sooner)
+  const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
+  const GYRO_SIGN_Y = 1.0;    // flip to -1 if forward/back tilt rolls the hole the wrong way on device
+
+  // per-preset black-hole masses (solar masses), driving a physically-ordered ringdown
+  // frequency (heavier hole -> slower wobble + ripple, f ~ 1/M). M87* and GARGANTUA are
+  // real measurements; QUASAR/BLAZAR are pinned to 3C 273 / OJ 287; the other four are
+  // invented presets given plausible SMBH masses so they slot into the same scheme.
+  const PRESET_MASS = {
+    GARGANTUA: 1.0e8,   // Interstellar (Kip Thorne, ~100 million)
+    ZEN: 2.0e8,   // invented (calm, light)
+    INFERNO: 5.0e8,   // invented (vigorous accretor)
+    QUASAR: 9.0e8,   // 3C 273 (archetypal quasar, ~886 million)
+    FACEON: 1.2e9,   // invented
+    M87: 6.5e9,   // M87* (Event Horizon Telescope, 2019)
+    PURELENS: 1.0e10,  // invented (dormant giant, no disk)
+    BLAZAR: 1.8e10,  // OJ 287 (primary, ~18 billion)
+  };
+  const MASS_REF = 1.0e8;       // anchor: the lightest hole rings at the full base frequency (scale 1)
+  const MASS_FREQ_ALPHA = 0.21; // log-compression: ringScale = (MASS_REF/M)^this. =1 is literal 1/M (heavy ones freeze); 0.21 squeezes the ~180x mass range to ~3x frequency so heavier still rings slower but stays visible
+  const WOBBLE_MAXAGE = 13.0;   // how long (s) a drop-in wobble is tracked before it's zeroed; long enough that even the slowest (heaviest) preset has damped to near nothing first (no snap)
 
   // the field of text the hole bends. lowercase, no em-dashes (house style).
   // a page can override the copy via window.BLACKHOLE_LINES (e.g. /void.html);
@@ -79,19 +123,29 @@ void main() {
   }
 
   const B_CRIT = 2.5980762;  // shadow radius in r_s; matches the shader
-  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, tex, raf = 0, startT = 0;
+  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, tex, raf = 0, startT = 0;
   let pullX = 0, pullY = 0, tgtPullX = 0, tgtPullY = 0; // hole's drift toward the pointer (uv offset)
   let velX = 0, velY = 0, pointerActive = false, pressed = false, pullTouch = false; // pull momentum + press state (touch = faster follow)
   let diskTime = 0, lastMs = 0;                        // disk-streak warped clock (speed follows mass)
-  let mass = 1.0, massTarget = 1.0, prevMass = 1.0;    // hole size: accumulates when fed, returns smoothly on release
+  let mass = 1.0, massTarget = 1.0, prevMass = 1.0;    // hole size: accumulates when fed, snaps back on release
+  let relT = 0, relM0 = 1.0, collapsing = false;       // release collapse: the swift accelerating snap from fed mass back to baseline
   let relRip = 0, wasPressed = false;                  // release ripple: the fabric keeps rippling after a feed (long, fades), the hole itself does not pulse
+  let ripShown = 0;                                    // low-passed ripple actually sent to the shader (no single-frame steps -> no click jolt)
+  let ripPhase = 0;                                    // accumulated ripple time-phase (integral of the freq scale); used instead of iTime so a changing freq can't jump the phase
+  let ripFreqShown = 1.0;                              // low-passed frequency scale sent to the shader, so the ripple's wavelength can't snap in one frame (e.g. a click clearing the ring)
+  let feedSilence = 0;                                 // 1 = feed ripple muted during a collapse; eases back to 0 so an interrupting click doesn't jolt the ring
   let prevHoleX = 0, prevHoleY = 0;                    // last hole-center offset, for the disk's motion-driven nod
+  let gyroX = 0, gyroY = 0, gyroTX = 0, gyroTY = 0;    // gyro drift: hole offset + tilt-driven target (eased, marble-in-bowl)
+  let gyroBeta0 = null, gyroGamma0 = null;             // neutral tilt baseline (captured on first reading, then slowly recentered)
+  let gyroActive = false, gyroRequested = false;       // gyro receiving data / permission already asked (iOS one-shot)
+  let driftScale = 1.0;                                // 1 = autonomous sin-drift on; fades to 0 once the gyro takes over the drift
   let baseScale = 1.0, szEff = 1.0;                    // responsive base size (per viewport) x the fed size
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
   let cfg = null;            // shader constants parsed from the frag (kept in sync)
   let navItems = [];         // nav links + their natural-position uv, for click tracking
   let fragSource = '';       // the raw shader source (preset is swapped in per selection)
   let presetScale = 1.0;     // per-preset size normalization so each look fills the frame similarly
+  let presetFreqScale = 1.0; // per-preset ringdown frequency factor from its mass (1 = lightest/fastest, smaller = heavier/slower)
   let currentPreset = '';    // the active preset name (kept in sync between the picker + swipe)
   let presetSelect = null;   // the picker <select>, so swipe can keep it in sync
   let swTouch = false, swX = 0, swY = 0, swT = 0, swPullX = 0, swPullY = 0; // touch swipe tracking (+ pull at gesture start, to undo it on a swipe)
@@ -101,33 +155,51 @@ void main() {
   const tctx = tcvs.getContext('2d');
 
   function buildTextTexture(q) {
+    // HORIZONTAL: render the field TEX_MARGIN wider than the viewport so rays bent
+    //   off-screen sample real text (the mirror seam sits off-screen).
+    // VERTICAL: size the texture to an EXACT whole number of line-spacing periods so it
+    //   tiles seamlessly top/bottom (WRAP_T=REPEAT continues the rows, no fold, no
+    //   half-row jump) -- this is the seam fix; the line spacing shifts a few % to align.
+    const M = (cfg && cfg.texMargin) || 0;
     const W = window.innerWidth, H = window.innerHeight;
-    tcvs.width = Math.round(W * q);
-    tcvs.height = Math.round(H * q);
-    const c = tctx;
-    c.setTransform(q, 0, 0, q, 0, 0); // draw in CSS px; texture is q-x for crisp bent text
-    c.fillStyle = '#000';
-    c.fillRect(0, 0, W, H);
+    const MW = W * (1 + 2 * M);
+    // a texture too big for the GPU (big retina + margin) fails texImage2D -> blank bg.
+    // the text is lensed/blurred, so a softer plane on huge displays isn't noticeable.
+    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    const qt = Math.min(q, maxTex / MW, maxTex / H);
 
-    const fs = Math.max(12, Math.round(H * 0.017));
-    const lh = Math.round(fs * 1.5);
+    // choose a line height that divides the viewport into a whole number of PERIODS (one
+    // period = the rows after which the phrase cycle AND the 2-tone banding both repeat),
+    // so nRows*lh === H exactly and the top edge meets the bottom edge with no half-row.
+    const PERIOD = LINES.length * 2;
+    const lhWant = Math.max(12, Math.round(H * 0.017)) * 1.5;
+    const periods = Math.max(1, Math.round(H / (PERIOD * lhWant)));
+    const nRows = PERIOD * periods;
+    const lh = H / nRows;                          // exact: nRows * lh === H
+    const fs = Math.max(10, Math.round(lh / 1.5));
+
+    tcvs.width = Math.round(MW * qt);
+    tcvs.height = Math.round(H * qt);
+    const c = tctx;
+    // shift the origin into the horizontal inset (vertical starts at 0); screen positions
+    // and the nav labels land where the shader's texSample reads them
+    c.setTransform(qt, 0, 0, qt, M * W * qt, 0);
+    c.fillStyle = '#000';
+    c.fillRect(-M * W, 0, MW, H);
+
     c.font = fs + 'px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
     c.textBaseline = 'top';
 
-    let row = 0;
-    // text fills the whole background; the "go home" link keeps its own dark
-    // clearing (box-shadow) so it stays legible over the field
-    const top = 0;
-    const bottom = H;
-    for (let y = top; y < bottom; y += lh, row++) {
+    for (let row = 0; row < nRows; row++) {
+      const y = row * lh;
       // subtle two-tone banding gives the field some depth
       c.fillStyle = (row % 2 === 0) ? '#828ea4' : '#6d7689';
-      // repeat the phrase across the full width, staggered per row, so the
+      // repeat the phrase across the full padded width, staggered per row, so the
       // field reads dense like a terminal rather than a tidy column
       const base = LINES[row % LINES.length] + '   ';
       let line = '';
-      while (c.measureText(line).width < W + 120) line += base;
-      const offset = -((row * 53) % 220);
+      while (c.measureText(line).width < MW + 600) line += base;
+      const offset = -M * W - 240 - ((row * 53) % 220);
       c.fillText(line, offset, y);
     }
 
@@ -172,21 +244,24 @@ void main() {
       driftAmt: n(/DRIFT_AMT\s*=\s*([-\d.eE]+)/, 0.0),
       driftSpeed: n(/DRIFT_SPEED\s*=\s*([-\d.eE]+)/, 1.0),
       diskCycle: n(/DISK_CYCLE\s*=\s*([-\d.eE]+)/, 8.0),
+      texMargin: n(/TEX_MARGIN\s*=\s*([-\d.eE]+)/, 0.0), // extra text rendered past the viewport on every side; must match the shader's texSample()
     };
     const name = (src.match(/#define\s+PRESET\s+(\w+)/) || [])[1] || 'QUASAR';
     const pm = src.match(new RegExp('DiskLook\\s+' + name + '\\s*=\\s*DiskLook\\(([^)]*)\\)'));
     const pv = pm ? pm[1].split(',').map(parseFloat) : [];
     const rin = Math.max(pv[3] || 1.8, 1.6);
     c.rout = Math.max(pv[4] || 8, rin + 0.5);
+    c.incl = (pv[1] != null && isFinite(pv[1])) ? pv[1] : 1.5; // disk inclination (rad): ~0 face-on, ~1.5 edge-on
     return c;
   }
 
-  // the hole's drifting center in uv (autonomous drift + pointer pull)
+  // the hole's drifting center in uv (autonomous drift + gyro tilt + pointer pull).
+  // mirrors the shader's `center` (blackhole.frag) so the lensed nav links track it.
   function holeCenterUV(time) {
     const s = time * cfg.driftSpeed * 0.15;
     return {
-      x: 0.5 + cfg.driftAmt * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX,
-      y: 0.5 + cfg.driftAmt * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY,
+      x: 0.5 + cfg.driftAmt * driftScale * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX + gyroX,
+      y: 0.5 + cfg.driftAmt * driftScale * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY + gyroY,
     };
   }
 
@@ -261,6 +336,9 @@ void main() {
     uInflow = gl.getUniformLocation(prog, 'iInflow');
     uRipple = gl.getUniformLocation(prog, 'iRipple');
     uDiskWob = gl.getUniformLocation(prog, 'iDiskWob');
+    uDriftScale = gl.getUniformLocation(prog, 'iDriftScale');
+    uRipFreq = gl.getUniformLocation(prog, 'iRipFreq');
+    uRipPhase = gl.getUniformLocation(prog, 'iRipPhase');
     gl.uniform1i(gl.getUniformLocation(prog, 'iChannel0'), 0);
   }
 
@@ -268,9 +346,20 @@ void main() {
   // render tiny (M87) or huge (BLAZAR) when switching. normalize so every look
   // fills a similar fraction of the frame (folded into szEff, alongside the fed size).
   function computePresetScale() {
-    const TARGET = 0.32; // disk outer edge as a fraction of screen height
-    const raw = TARGET * B_CRIT / Math.max(cfg.rout * cfg.holeR, 1e-4);
+    const TARGET = 0.32;       // disk outer edge as a fraction of screen height (edge-on presets)
+    const FACE_SHRINK = 0.35;  // MOBILE only: a face-on disk reads as a big filled circle that buries the lensed text on a narrow portrait screen; shrink it by up to this fraction so the fabric stays visible. desktop has horizontal room, so it's untouched.
+    const faceOn = isCoarse ? Math.max(0, Math.cos(Math.min(cfg.incl, 1.5707963))) : 0.0; // ~1 face-on, ~0 edge-on; 0 on desktop
+    const target = TARGET * (1.0 - FACE_SHRINK * faceOn);
+    const raw = target * B_CRIT / Math.max(cfg.rout * cfg.holeR, 1e-4);
     presetScale = Math.max(0.5, Math.min(raw, 6.0));
+    // desktop: the disk-normalization above leaves the compact-disk looks (M87, GARGANTUA,
+    // ZEN) with a much wider shadow on screen. zoom those out proportional to how wide the
+    // shadow sits, so they don't fill the frame; the small-shadow looks (QUASAR, BLAZAR)
+    // sit below EH_ZOOM_REF and are left alone.
+    if (!isCoarse) {
+      const shadowFrac = cfg.holeR * presetScale; // shadow radius as a fraction of screen height (at baseScale 1)
+      presetScale /= 1.0 + EH_ZOOM_K * Math.max(0, shadowFrac - EH_ZOOM_REF);
+    }
   }
 
   // relink with the chosen preset, resync the parsed constants + size, redraw
@@ -282,6 +371,14 @@ void main() {
     cfg = parseCfg(src);
     computePresetScale();
     currentPreset = name;
+    presetFreqScale = presetMassFreqScale(name); // this hole's ringdown frequency from its mass
+    // a switched-in hole arrives FRESH: clear any leftover feed/collapse/ring state from
+    // the previous one, so nothing accumulates across switches (stuck size, pinned ripple,
+    // a stray collapse armed by a swipe-tap). the drop-in wobble (kickWobble) is the only
+    // motion a new hole should carry.
+    mass = 1.0; massTarget = 1.0; prevMass = 1.0; relM0 = 1.0;
+    collapsing = false; relT = 0; relRip = 0; ripShown = 0; feedSilence = 0; inflowPhase = 0; diskTime = 0;
+    ripFreqShown = presetFreqScale; // start the new hole at its own baseline frequency, not eased from the old one
     if (presetSelect && presetSelect.value !== name) presetSelect.value = name; // keep the picker in sync (swipe)
     try { localStorage.setItem('bh-preset', name); } catch (e) { /* private mode / file:// */ }
     resize();                    // resets viewport + iResolution + re-uploads the text texture for the new program
@@ -304,7 +401,11 @@ void main() {
     uy += (Math.random() - 0.5) * 0.25;
     wobDX = amp * ux;
     wobDY = amp * uy;
-    wobW = WOBBLE_OMEGA / Math.sqrt(presetScale) * (0.9 + Math.random() * 0.2); // heavier hole -> slower wobble (inertia)
+    // quasinormal ringdown: a perturbed black hole rings at f ~ 1/M, damped. each preset's
+    // mass sets its frequency via presetFreqScale (log-compressed 1/M), so heavier holes
+    // (M87, BLAZAR) settle slow and ponderous while the lighter ones (GARGANTUA) ring
+    // quicker. the small random is just so repeated switches don't land mechanically identical.
+    wobW = WOBBLE_OMEGA * presetFreqScale * (0.9 + Math.random() * 0.2);
     wobZ = WOBBLE_ZETA * (0.95 + Math.random() * 0.12);                          // slight per-change variation
     wobAge = 0;
   }
@@ -335,8 +436,8 @@ void main() {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); // horizontal: padded + mirrored in texSample
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);        // vertical: texture is a whole line-period multiple -> tiles seamlessly top/bottom
     gl.activeTexture(gl.TEXTURE0);
 
     const p = compileProgram(fragWithPreset(initial));
@@ -345,6 +446,7 @@ void main() {
     cfg = parseCfg(fragWithPreset(initial));
     computePresetScale();
     currentPreset = initial;
+    presetFreqScale = presetMassFreqScale(initial);
 
     // only now (WebGL2 is live) hide the real nav text; its lensed copy shows
     document.body.classList.add('bh-lensed-nav');
@@ -361,6 +463,16 @@ void main() {
     // suppress the menu the browser would otherwise pop (Android especially)
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
+    // gyro drift: Android exposes the sensor with no prompt, so attach it now for
+    // instant tilt. iOS requires a permission request from a user gesture -> deferred
+    // to the first tap (enableGyro, called in onPointerDown).
+    if (!reduceMotion && isCoarse) {
+      const DOE = window.DeviceOrientationEvent;
+      if (DOE && typeof DOE.requestPermission !== 'function') {
+        gyroRequested = true;
+        window.addEventListener('deviceorientation', onOrient);
+      }
+    }
     addPresetPicker(initial);
     start();
   }
@@ -416,26 +528,56 @@ void main() {
       velX *= PULL_FRICTION; velY *= PULL_FRICTION;
     }
 
-    // mass: holding pours mass in (grows the hole), capped; on release it returns
-    // smoothly to baseline (the hole itself does NOT pulse/ring). the big mass shift
-    // on release instead kicks a long ripple in the spacetime fabric (below).
-    if (pressed) massTarget = Math.min(massTarget + FEED_RATE * dt, MASS_MAX);
-    else massTarget += (1.0 - massTarget) * MASS_DECAY;
-    mass += (massTarget - mass) * MASS_EASE;
+    // gyro marble-in-bowl: the hole eases toward the tilt-driven target (heavy lag,
+    // no snap). once the gyro is live it owns the ambient drift, so the autonomous
+    // sin-drift fades out (driftScale -> 0); if the gyro is denied/absent it stays.
+    gyroX += (gyroTX - gyroX) * GYRO_EASE;
+    gyroY += (gyroTY - gyroY) * GYRO_EASE;
+    driftScale += ((gyroActive ? 0.0 : 1.0) - driftScale) * 0.04;
 
-    // on release of a feed, the collapsing mass shift sets the fabric rippling; it
-    // then keeps oscillating and slowly damps out (long), scaled by how much was fed.
-    if (wasPressed && !pressed && mass > 1.05) relRip = Math.min(relRip + (mass - 1.0) * REL_RIP_GAIN, REL_RIP_MAX);
+    // mass: holding pours mass in (grows the hole), capped. on release the fed mass
+    // COLLAPSES back to baseline along a swift, accelerating e^x curve (the "phiiuuuv"
+    // snap): it hangs a beat, then rushes home. the collapse itself is SILENT -- the
+    // spacetime fabric only rings AFTER it lands (the kick fires on completion, below).
+    if (pressed) {
+      collapsing = false;
+      massTarget = Math.min(massTarget + FEED_RATE * dt, MASS_MAX);
+      mass += (massTarget - mass) * MASS_EASE;       // gentle pour-in while held
+    } else {
+      if (wasPressed && mass > 1.001) { relM0 = mass; relT = 0; collapsing = true; } // just released: arm the snap from the fed size
+      if (collapsing) {
+        relT += dt;
+        const p = Math.min(relT / MASS_COLLAPSE_DUR, 1.0);
+        // accelerating ease-in: e^(k*p) normalized to 0..1 (k=0 would be linear)
+        const ease = (Math.exp(MASS_COLLAPSE_EXP * p) - 1.0) / (Math.exp(MASS_COLLAPSE_EXP) - 1.0);
+        mass = 1.0 + (relM0 - 1.0) * (1.0 - ease);
+        if (p >= 1.0) {
+          mass = 1.0; collapsing = false;
+          // collapse has LANDED: ring the fabric. strength scales across the FULL hold
+          // range (fed mass 1..MASS_MAX -> 0..1), so a long hold rings proportionally
+          // harder than a tap. take the MAX (not a sum) over any still-decaying ring so
+          // rapid hold-releases don't accumulate a pinned ripple.
+          const fed = Math.min((relM0 - 1.0) / (MASS_MAX - 1.0), 1.0);
+          relRip = Math.max(relRip, Math.min(fed * REL_RIP_GAIN, REL_RIP_MAX));
+        }
+      } else {
+        mass = 1.0;
+      }
+      massTarget = mass;
+    }
     wasPressed = pressed;
-    relRip *= REL_RIP_DECAY;
+    // the post-collapse ring damps out over a time-constant that scales with the fed mass:
+    // a long hold (heavy hole) rings for several seconds, a tap fades in ~a second (tau ~ M).
+    const relTau = REL_RIP_TAU * (1.0 + REL_RIP_TAU_K * Math.max(0.0, relM0 - 1.0));
+    relRip *= Math.exp(-dt / relTau);
 
     // the whirl, the largening, and the flare/color all ride the SAME exponential
     // feed curve (feedPow), each with its own gain, so they ramp together (proportional).
     // gentle at first as you start holding, then ramps up the longer you feed.
-    const diskSpeed = feedPow(DISK_SPEED_K);
+    const diskSpeed = Math.min(feedPow(DISK_SPEED_K), DISK_SPEED_MAX); // cap so the whirl can't advect fast enough to alias/flicker at high fed mass
     diskTime += dt * diskSpeed;
-    const wrapT = cfg.diskCycle * 4096.0;        // bound the disk clock (feeding is uncapped) without changing fract(t/cycle)
-    if (diskTime > wrapT) diskTime -= wrapT;
+    const wrapT = cfg.diskCycle * 16.0;          // keep the disk clock TINY so feeding can't accumulate it into precision/aliasing flicker; 16 is an integer x cycle, so fract(t/cycle) (the only thing the disk reads) is unchanged -> invisible wrap
+    while (diskTime > wrapT) diskTime -= wrapT;  // while-loop: a big feed burst can overshoot by more than one wrap in a frame
 
     // feeding is mostly a brightness flare + a subtle swell (not a zoom). the
     // responsive base size keeps the whole disk on-screen on narrow viewports.
@@ -448,7 +590,7 @@ void main() {
 
     // preset-change wobble: the new hole drops in and settles (decaying cosine,
     // starts displaced up + leaning so it falls onto the screen). per-change random.
-    if (wobAge < 7.0) {
+    if (wobAge < WOBBLE_MAXAGE) {
       wobAge += dt;
       const zw = wobZ * wobW;
       const wd = wobW * Math.sqrt(Math.max(1.0 - wobZ * wobZ, 1e-3)); // damped frequency
@@ -466,18 +608,56 @@ void main() {
     szEff *= (1.0 + wobSwell);           // the impact swell deepens the lensing
 
     gl.uniform1f(uTime, t);
-    gl.uniform2f(uCursor, pullX + wobX, pullY + wobY);
+    gl.uniform2f(uCursor, pullX + wobX + gyroX, pullY + wobY + gyroY);
     gl.uniform1f(uDiskTime, diskTime);
+    gl.uniform1f(uDriftScale, driftScale);
     gl.uniform1f(uMass, szEff);
     gl.uniform1f(uFlare, flare);
     gl.uniform1f(uInflow, inflowPhase);
-    // spacetime vibration: feeding shakes the fabric (sustained), the size *changing*
-    // shakes it more -- and on release the size RINGS, so each swing of that ring
-    // re-shakes the fabric, giving a long wobble train that fades with the ring.
-    const feedRip = Math.max(0, 1.0 - Math.exp(-(mass - 1.0) * RIPPLE_FEED_K));
-    const moveRip = (dt > 0 ? Math.abs(mass - prevMass) / dt : 0) * RIPPLE_VEL_K;
+    // spacetime vibration: feeding shakes the fabric (sustained) and the size *changing*
+    // shakes it more. during the release collapse both are muted (feedSilence) so the
+    // snap is clean; the ring then fires on landing (relRip) and re-shakes the fabric in
+    // a long train that fades with it.
+    // the collapse silences the feed ripple so the snap is clean (the ring fires after via
+    // relRip). snap INTO silence at once, but ease OUT of it -- so clicking again mid-collapse
+    // ramps the ripple back in instead of stepping feedRip from 0 to full and jolting the ring.
+    const silenceTarget = collapsing ? 1.0 : 0.0;
+    if (silenceTarget > feedSilence) feedSilence = silenceTarget;
+    else feedSilence += (silenceTarget - feedSilence) * SILENCE_EASE;
+    const feedActive = 1.0 - feedSilence;
+    const feedRip = feedActive * Math.max(0, 1.0 - Math.exp(-(mass - 1.0) * RIPPLE_FEED_K));
+    const moveRip = feedActive * (dt > 0 ? Math.abs(mass - prevMass) / dt : 0) * RIPPLE_VEL_K;
     prevMass = mass;
-    gl.uniform1f(uRipple, Math.min(wobRip + feedRip + moveRip + relRip, 1.6));
+    const ripScale = isCoarse ? MOBILE_RIPPLE : DESKTOP_RIPPLE; // calmer on hand-held screens (nausea), heavier + stronger on desktop
+    const ripTarget = Math.min(wobRip + feedRip + moveRip + relRip, RIPPLE_CAP) * ripScale;
+    ripShown += (ripTarget - ripShown) * RIP_EASE; // smooth so the ripple can't jolt the ring in one frame
+    gl.uniform1f(uRipple, ripShown);
+    // ripple frequency follows whichever mass is DRIVING the current ripple -- the live
+    // feed OR a still-ringing post-collapse train (relM0) -- whichever is heavier. taking
+    // the max is what stops the flicker: otherwise a new press snaps the frequency back to
+    // ~1 (30 rings) while a big leftover ring is still at high amplitude, and high amp x
+    // high freq aliases the lensed text into a shimmer that compounds across repeats.
+    const ringing = relRip > 0.02 && !pressed; // a post-collapse release ring is the active driver (not a live feed)
+    const ringMass = ringing ? relM0 : 1.0;
+    const freqMass = Math.max(pressed ? mass : 1.0, ringMass);
+    // combine the preset's baseline ringdown (its real mass) with the interactive fed-mass
+    // slowdown, so a heavy hole ripples slower at rest AND slows further as you feed it.
+    // the release ring drops further (REL_RIP_FREQ) so its waves roll out slow + big + felt.
+    const ripFreqNow = presetFreqScale * ripFreqScale(freqMass)
+      * (isCoarse ? 1.0 : DESKTOP_RIP_FREQ)   // desktop rings bigger/slower (heavier)
+      * (ringing ? REL_RIP_FREQ : 1.0);        // release ring rings slower than feeding
+    // low-pass the frequency too: clicking clears the ring's low freq, which would otherwise
+    // snap the ripple's wavelength short in one frame while the amplitude is still fading -> jolt.
+    ripFreqShown += (ripFreqNow - ripFreqShown) * RIP_EASE;
+    gl.uniform1f(uRipFreq, ripFreqShown);
+    // accumulate the temporal phase incrementally (NOT iTime * freq): a changing frequency
+    // only affects the next step, never the whole accumulated phase -- otherwise a large
+    // wall-clock iTime turns each freq change into a giant phase jump (the flicker that grew
+    // across long holds + switches). wrap at 2pi; RIPPLE_SPEED/DISK_RIP_SPEED are integers, so
+    // the wrap is exact (their multiples of 2pi leave sin unchanged) and keeps the args tiny.
+    ripPhase += dt * ripFreqShown;
+    if (ripPhase > 6.283185307) ripPhase -= 6.283185307;
+    gl.uniform1f(uRipPhase, ripPhase);
 
     // the disk nods/sloshes with the hole's shake (the wobble oscillation) and with
     // its motion (the drag velocity), so it visibly wobbles, not just translates.
@@ -496,6 +676,22 @@ void main() {
   // they stay proportional -- ramping together on the same exponential.
   function feedPow(k) { return Math.exp(k * (mass - 1.0)); }
 
+  // the one mass-frequency law: a heavier hole rings as fewer/bigger/slower waves
+  // (physical: f ~ 1/M). returns a single frequency scale applied UNIFORMLY to the
+  // fabric ripple AND the disk ripple (via iRipFreq in the shader), so they stay
+  // consistent. universal -- it's physics, so it holds on desktop and mobile alike.
+  function ripFreqScale(m) {
+    return 1.0 / (1.0 + RIP_MASS_K * Math.max(0.0, m - 1.0));
+  }
+
+  // per-preset ringdown frequency from its real (or representative) mass. log-compressed
+  // (MASS_FREQ_ALPHA) so the ~180x mass spread reads as ~3x frequency: heavier black holes
+  // wobble + ripple slower (f ~ 1/M, the real ordering) without the giants freezing solid.
+  function presetMassFreqScale(name) {
+    const m = PRESET_MASS[name] || MASS_REF;
+    return Math.pow(MASS_REF / m, MASS_FREQ_ALPHA);
+  }
+
   function start() {
     cancelAnimationFrame(raf);
     if (reduceMotion) {
@@ -508,6 +704,9 @@ void main() {
       gl.uniform1f(uInflow, inflowPhase);
       gl.uniform1f(uRipple, 0.0); // no wobble ripple in the static (reduced-motion) frame
       gl.uniform1f(uDiskWob, 0.0);
+      gl.uniform1f(uDriftScale, 1.0); // gyro is off under reduced motion; keep the drift term intact
+      gl.uniform1f(uRipFreq, 1.0);    // baseline ripple frequency (no ripple in this static frame anyway)
+      gl.uniform1f(uRipPhase, 0.0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       navUpdate(8.0);
     } else {
@@ -544,12 +743,17 @@ void main() {
   // a press on a control (the preset picker, a link, a button) shouldn't feed.
   // a touch press also starts swipe tracking (a horizontal swipe cycles presets).
   function onPointerDown(e) {
+    enableGyro(); // iOS: the first tap is the user gesture that unlocks the gyro permission (no-op after / on Android)
     swTouch = false;
     if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input')) return;
     if (e.pointerType !== 'mouse') { swTouch = true; swX = e.clientX; swY = e.clientY; swT = e.timeStamp; swPullX = pullX; swPullY = pullY; }
     onPointerMove(e);
     pressed = true;
     massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
+    // each new feed clears the lingering release ring so rapid holds don't pile it up
+    // ("strange wobble"). ripShown eases it down, no pop. (inflow no longer hard-reset
+    // here -- that jumped the streak radius; its fast decay handles accumulation instead.)
+    relRip = 0;
   }
   // release: stop the spin-up. touch/pen also ends the pull so it coasts to a
   // stop; mouse keeps following its cursor (the desktop pull ends on mouseleave).
@@ -577,6 +781,38 @@ void main() {
     }
   }
   function onMouseLeave() { pointerActive = false; pressed = false; }
+
+  // gyroscope drift (mobile). tilt feeds a bounded, baseline-relative target the hole
+  // eases toward in render() (marble in a bowl). a slow baseline recenter keeps a held
+  // tilt from parking the hole off-screen. portrait hold: gamma = left/right, beta = front/back.
+  function onOrient(e) {
+    if (e.beta == null || e.gamma == null) return; // no real sensor (desktop): leave the sin-drift on
+    gyroActive = true;                             // -> render() fades the autonomous drift out
+    if (gyroBeta0 == null) { gyroBeta0 = e.beta; gyroGamma0 = e.gamma; } // capture the neutral hold
+    gyroBeta0 += (e.beta - gyroBeta0) * GYRO_RECENTER;     // slowly forget a sustained tilt
+    gyroGamma0 += (e.gamma - gyroGamma0) * GYRO_RECENTER;
+    const dB = e.beta - gyroBeta0, dG = e.gamma - gyroGamma0;
+    gyroTX = clamp1(GYRO_SIGN_X * dG / GYRO_RANGE) * GYRO_MAX; // tilt right -> hole rolls right (downhill)
+    gyroTY = clamp1(GYRO_SIGN_Y * dB / GYRO_RANGE) * GYRO_MAX; // tilt forward/back -> rolls down/up
+  }
+  function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
+
+  // wire up the gyro. iOS 13+ gates DeviceOrientation behind a permission prompt that
+  // must be requested from inside a user gesture, so there we wait for the first tap
+  // (called from onPointerDown). Android has no prompt and is attached at init instead.
+  function enableGyro() {
+    if (gyroRequested || reduceMotion || !isCoarse) return;
+    const DOE = window.DeviceOrientationEvent;
+    if (!DOE) return;
+    gyroRequested = true;
+    if (typeof DOE.requestPermission === 'function') {
+      DOE.requestPermission().then(function (s) {
+        if (s === 'granted') window.addEventListener('deviceorientation', onOrient);
+      }).catch(function () { /* denied / not a gesture: the sin-drift just stays on */ });
+    } else {
+      window.addEventListener('deviceorientation', onOrient);
+    }
+  }
 
   // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
   // throwing the landing wobble in the arrow's direction. when the picker <select>

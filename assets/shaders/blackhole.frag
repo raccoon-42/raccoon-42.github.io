@@ -25,6 +25,9 @@ uniform float     iFlare;       // disk luminosity multiplier; rises as you feed
 uniform float     iInflow;      // feeding: drives the inward pull (disk matter spirals inward toward the shadow). set in blackhole.js
 uniform float     iRipple;      // 0 normally; >0 while the hole wobbles -> a radial wave shakes the lensed text (spacetime fabric). set in blackhole.js
 uniform float     iDiskWob;     // transient tilt added to the disk inclination so it nods/sloshes when the hole shakes or moves (0 at rest). set in blackhole.js
+uniform float     iDriftScale;  // 1 = autonomous sin-drift on; faded to 0 on mobile when the gyroscope drives the drift instead. set in blackhole.js
+uniform float     iRipFreq;     // ripple frequency scale (1 = baseline). <1 makes the fabric + disk ring as fewer/bigger/slower waves -- a heavier hole rings lower. set in blackhole.js
+uniform float     iRipPhase;    // accumulated ripple time-phase = integral of iRipFreq dt (wrapped). use THIS, not iTime, for the ripple's temporal term: a changing frequency must not jump the phase (which iTime*freq does, worse as iTime grows). set in blackhole.js
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -32,6 +35,7 @@ out vec4 outColor;
 // ---------------------------------------------------------------- tunables --
 const float HOLE_RADIUS   = 0.06;    // shadow radius as a fraction of screen height
 const float LENS_DEPTH    = 1000.0;    // how hard the background text bends
+const float TEX_MARGIN    = 0.30;    // HORIZONTAL padding only: the text plane is rendered this much wider than the viewport each side, so rays bent off-screen left/right sample real text instead of the mirror seam. (VERTICALLY the texture is an exact line-period multiple and tiles seamlessly via WRAP_T=REPEAT -- see texSample + buildTextTexture.) matched in blackhole.js.
 const float INTENSITY     = 0.06;    // 0 = fast disk, 1 = slow/dilated, massive feel
 const float DRIFT_AMT     = 0.045;   // hole wander: makes the bent text ripple
 const float DILATION_MIN  = 0.20;    // disk pattern rate at full INTENSITY
@@ -54,7 +58,7 @@ const float DOPP_COLOR     = 2.0;    // exaggerate the Doppler/grav shift on col
 const float RIPPLE_AMP     = 0.06;   // ripple displacement of the sampled fabric (screen-height units) -- this is the main "how violent" knob
 const float RIPPLE_FREQ    = 30.0;   // ripple spatial frequency (fewer, bigger wave rings = more visible slosh)
 const float RIPPLE_SPEED   = 7.0;    // how fast the rings propagate outward
-const float RIPPLE_FALL    = 0.5;    // how fast the ripple fades with distance from the hole (lower = reaches further out, more even across presets)
+const float RIPPLE_FALL    = 0.9;    // how fast the ripple fades with distance from the hole (lower = reaches further out, more even across presets)
 // the accretion disk ripples too (same iRipple envelope): a radial wave runs
 // through the disk, shifting its streaks in/out and pulsing brightness in rings.
 const float DISK_RIP_FREQ  = 0.9;    // disk ripple rings per r_s of radius (fewer = bigger, more visible rings)
@@ -107,6 +111,18 @@ vec2 rot(vec2 v, float a) {
 
 // mirrored repeat keeps lensed samples on-screen without edge smearing
 vec2 mirrorUV(vec2 u) { return 1.0 - abs(1.0 - mod(u, 2.0)); }
+
+// map a screen-uv sample (0..1 = the screen) onto the lens-plane texture.
+// HORIZONTAL: the text is padded TEX_MARGIN past the viewport each side, so off-screen
+//   samples read real text; mirror at the (off-screen) padded edge.
+// VERTICAL: the texture is sized to an exact whole number of line-spacing periods, so
+//   it tiles SEAMLESSLY -- pass y straight through and let WRAP_T = REPEAT continue the
+//   rows (no mirror fold, no row-spacing jump). this is the "stitched top edge" fix.
+vec2 texSample(vec2 s) {
+    float u = (s.x + TEX_MARGIN) / (1.0 + 2.0 * TEX_MARGIN);
+    float x = 1.0 - abs(1.0 - mod(u, 2.0));   // horizontal mirror within the padded width
+    return vec2(x, s.y);                       // vertical: raw, WRAP_T = REPEAT tiles it
+}
 
 // unit Lissajous wander: incommensurate sines, never visibly repeats
 vec2 lissa(float t) {
@@ -161,7 +177,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // fixed, centered hole (no pomodoro / token modes)
     float I      = INTENSITY;
     float sz     = iMass;   // 1 = baseline; >1 = fed/heavier, grows shadow + disk + lensing together
-    vec2  center = vec2(0.5, 0.5) + DRIFT_AMT * lissa(t * 0.15) + iCursor;
+    vec2  center = vec2(0.5, 0.5) + DRIFT_AMT * iDriftScale * lissa(t * 0.15) + iCursor;
 
     float rh     = HOLE_RADIUS * sz;       // shadow radius in screen units
     float dil    = mix(1.0, DILATION_MIN, I);
@@ -185,9 +201,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // banded between the shadow and a few diameters out; propagates outward.
     // band it from just outside the shadow (so it tracks the hole as it grows) on
     // out across the field, propagating outward
+    // temporal term uses the accumulated iRipPhase (NOT iTime*iRipFreq): a changing
+    // frequency must only affect the next step, else a large iTime turns each freq
+    // change into a giant phase jump -> the high-frequency wobble after long waits.
+    // fade the ripple from the shadow EDGE over a reach that grows with the hole size
+    // (sz = iMass), so a big/fed shadow ripples across its visible rim instead of the
+    // wave dying right at the edge -- the "large hole has no visible ripple" case (worst
+    // on mobile, where the shadow eats most of the screen). floored + capped on sz.
+    float ripReach = clamp(sz, 1.0, 3.0) / RIPPLE_FALL;
     float rip = iRipple * RIPPLE_AMP
-              * sin(plen * RIPPLE_FREQ - iTime * RIPPLE_SPEED)
-              * smoothstep(rh, 1.5 * rh, plen) * exp(-plen * RIPPLE_FALL);
+              * sin(plen * RIPPLE_FREQ * iRipFreq - iRipPhase * RIPPLE_SPEED)
+              * smoothstep(rh, 1.5 * rh, plen) * exp(-max(plen - rh, 0.0) / ripReach);
     vec2  ripOff = (p / max(plen, 1e-5)) * rip;
 
     float bmax = rout + 3.0;                // rays beyond this can't touch the disk
@@ -210,7 +234,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec2  sp  = p - dir * defl * k;
             sp.x += WARP_LEAN * p.y * window * shield;  // lean (matches the near field)
             sp += ripOff;                               // shake the fabric (matches the near field)
-            vec2  suv = mirrorUV(center + sp / vec2(aspect, 1.0));
+            vec2  suv = texSample(center + sp / vec2(aspect, 1.0));
             term[i]   = texture(iChannel0, suv)[i];
         }
         vec3 d = normalize(vec3(-(pr / b) * (2.0 / b), -1.0));
@@ -262,7 +286,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             if (rc > rin && rc < rout) {
                 // disk ripple: a radial wave (same iRipple envelope as the fabric, but
                 // slower) wobbles the bright ring's radius in/out + pulses its brightness
-                float diskRip = iRipple * sin(rc * DISK_RIP_FREQ - iTime * DISK_RIP_SPEED);
+                float diskRip = iRipple * sin(rc * DISK_RIP_FREQ * iRipFreq - iRipPhase * DISK_RIP_SPEED);
                 float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
                 float band = smoothstep(rin, rin * 1.25, rcW)
                            * (1.0 - smoothstep(rout * 0.70, rout, rcW));
@@ -329,7 +353,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             // the far field, so the two stay continuous across the handoff ring
             samp.x += WARP_LEAN * p.y * window * shield;
             samp += ripOff;                              // shake the fabric (matches the far field)
-            vec2  suv = mirrorUV(center + samp / vec2(aspect, 1.0));
+            vec2  suv = texSample(center + samp / vec2(aspect, 1.0));
             // rays bent past ~90deg never reach the plane; fade to the starfield
             float toward = smoothstep(0.05, 0.35, -d.z);
             bg += texture(iChannel0, suv).rgb * toward;
