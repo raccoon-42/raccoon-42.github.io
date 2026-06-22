@@ -23,8 +23,8 @@
   const PULL_DAMP = 10.0;     // touch: damping (>~2*sqrt(STIFF) = no springback, just a heavy sluggish catch-up)
   const PULL_COAST = 3.5;      // touch: after release, how fast the coasting hole slows to rest (per second)
   const PULL_FRICTION = 0.90;  // mouse: on release it coasts on its last velocity, slowing to a stop where it lands
-  const DISK_SPEED_K = 0.0; // the whirl fastens exponentially with mass while held: speed = e^(K*(mass-1)) (gentle, then ramps up)
-  const DISK_SPEED_MAX = 6.5; // cap on that whirl: past this the streak advection aliases per frame and the spin flickers. ~the old MASS_MAX=3 top speed, kept smooth now that mass can reach 10
+  const DISK_SPEED_FLOOR = 0.2; // floor on the disk's real-time rate. by Omega ~ 1/M every real-time rate (swirl + inflow) slows with mass: heavier PRESETS orbit slower at rest (presetFreqScale, log-compressed 1/M, shared with the ringdown) AND feeding grows the hole self-similarly (feedPow(MASS_SIZE_K)) for a further 1/M. rate = presetFreqScale/feedPow(MASS_SIZE_K*DISK_SLOW_POW), floored here so a fed giant can't freeze the disk solid. (replaced DISK_SPEED_K/MAX, which SPED the whirl up on feed -- wrong: that's accretion rate, which doesn't change orbital speed)
+  const DISK_SLOW_POW = 1.0; // PHYSICALLY HONEST setting. feeding zooms the hole, so at a fixed screen pixel the physical radius is fixed while M grows -> the disk genuinely SPEEDS UP ~sqrt(M) (Omega = sqrt(M/r^3)), while a single gas blob at fixed r/r_s correctly slows ~1/M. the 1/M clock at pow=1 produces BOTH at once -> nothing to "fix". pow>1 over-slows the on-screen swirl into an UNphysical slowdown (was 2.0, to match a heavier=slower hunch that only holds for following one blob, not a fixed screen -- reverted as a fudge). raise only to buy that aesthetic back on purpose
   const FEED_TAP = 0.15; // size the hole gains per press (a tap of mass)
   const FEED_RATE = 0.8;  // extra size per second while a press is held (pouring mass in)
   const MASS_MAX = 4.0;  // hard cap on the size multiplier (how big it can ever get)
@@ -33,9 +33,12 @@
   const MASS_EASE = 0.045; // while held, how smoothly the visible size follows the accumulated mass (the gentle pour-in feel; release uses the collapse animation). lowered from 0.08 so the initial tap's FEED_TAP bump swells IN gradually instead of the disk popping large on the first click/touch
   const MASS_SIZE_K = 0.5; // the event horizon largens exponentially with mass: size = e^(K*(mass-1)) (higher = the zoom accelerates sooner/harder)
   const MASS_LUM_K = 0.7; // feeding brightens + heats the disk (bluer, via the shader's TEMP_BLUE): flare = e^(K*(mass-1)) (lower = reaches white more gradually)
+  const FLARE_ZOOM_COMP = 0.0; // PHYSICALLY HONEST setting (off). a real zoom CONSERVES surface brightness, so as the hole grows the bright disk covers more of the frame and it genuinely brightens -- that is correct, not a surge to cancel. >0 divides the flare by feedPow(MASS_SIZE_K*this) to dim per-pixel and tame that brightening (an aesthetic choice; was 1.0, reverted). raise only if the honest brighten-on-feed reads as too much
   const VIEW_FIT = 0.8;  // responsive base size: zoom the hole out on narrow/portrait screens so the event horizon has margin (mobile); wide screens clamp to 1.0 (unaffected)
   const VIEW_MIN = 0.33; // floor for that base size (never smaller than this fraction)
   const VIEW_MAX = 0.6;  // ceiling: wide/desktop screens cap here (was 1.0) so the hole isn't too zoomed -- leaves room to see beyond the event horizon
+  const ZOOM_MIN = 0.02;  // floor on the camera zoom (only a guard: iCamZoom divides p, so 0 would blow up). effectively infinite zoom-OUT
+  const ZOOM_STEP = 1.18; // multiply/divide camZoom by this per +/- tap. no upper cap -> infinite zoom-IN (keep tapping +)
   const EH_ZOOM_REF = 0.07; // desktop: shadow screen-height fraction below which no extra zoom-out (compact-disk presets already sit small; QUASAR/BLAZAR are ~0.05-0.06)
   const EH_ZOOM_K = 3.5;    // desktop: how hard a WIDER event horizon is zoomed out -> presetScale /= 1 + this*(shadowFrac - EH_ZOOM_REF). bigger = the wide-shadow looks (M87, GARGANTUA) zoom out more; 0 = off (disk-normalized only)
   const INFLOW_SPEED = 0.6;  // how fast the disk's matter spirals inward while you hold (drives INFALL_K in the shader; 0 = off)
@@ -68,7 +71,7 @@
   // ON TOP of the finger pull and, while live, replaces the autonomous sin-drift.
   const GYRO_MAX = 0.42;      // max uv offset a tilt can push the hole. 0.42 lets it roll right out to the screen edges (center 0.5 +/- this); lower = stays more central
   const GYRO_RANGE = 32.0;    // degrees of tilt from baseline that map to the full GYRO_MAX
-  const GYRO_EASE = 0.011;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 -> 0.018 -> 0.011 as the wider GYRO_MAX made the same ease cover much more distance per frame -> felt too fast
+  const GYRO_EASE = 0.007;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 -> 0.018 -> 0.011 -> 0.007 as it kept feeling too fast; the wider GYRO_MAX makes the same ease cover a lot of distance per frame
   const GYRO_DEAD = 0.16;     // deadzone: fraction of the tilt range near neutral that produces NO movement, so small/incidental tilts don't drift the hole. re-normalized past the deadzone, so a full tilt still reaches the edge (just needs a deliberate tilt to start). 0 = react to the slightest motion
   const GYRO_RECENTER = 0.0006;// per-reading drift of the neutral baseline toward the held angle. KEPT TINY so a held tilt PERSISTS (hole stays pushed to the edge, doesn't fade back); just enough that a permanent pose change eventually re-neutralizes over ~30s. 0 = never recenter
   const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
@@ -149,7 +152,7 @@ void main() {
   }
 
   const B_CRIT = 2.5980762;  // shadow radius in r_s; matches the shader
-  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, tex, raf = 0, startT = 0;
+  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, uCamZoom, tex, raf = 0, startT = 0;
   let pullX = 0, pullY = 0, tgtPullX = 0, tgtPullY = 0; // hole's drift toward the pointer (uv offset)
   let velX = 0, velY = 0, pointerActive = false, pressed = false, pullTouch = false; // pull momentum + press state (touch = faster follow)
   let diskTime = 0, lastMs = 0;                        // disk-streak warped clock (speed follows mass)
@@ -173,6 +176,7 @@ void main() {
   const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
   let driftScale = 1.0;                                // 1 = autonomous sin-drift on; fades to 0 once the gyro takes over the drift
   let baseScale = 1.0, szEff = 1.0;                    // responsive base size (per viewport) x the fed size
+  let camZoom = 1.0;                                    // manual +/- CAMERA zoom (FOV: scales the whole scene -- hole, disk, lensing, background -- together); via iCamZoom; persisted in localStorage
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
   let cfg = null;            // shader constants parsed from the frag (kept in sync)
   let navItems = [];         // nav links + their natural-position uv, for click tracking
@@ -303,6 +307,7 @@ void main() {
   function navUpdate(time) {
     if (!cfg || !navItems.length) return;
     const W = window.innerWidth, H = window.innerHeight, aspect = W / H;
+    const cz = camZoom; // camera zoom scales each link's offset-from-center + its bend (see below)
     const cc = holeCenterUV(time);
     const cx = cc.x, cy = cc.y;
     const rh = cfg.holeR * szEff, Wm = B_CRIT / Math.max(rh, 1e-4); // effective size (base x fed); keep nav in sync
@@ -321,7 +326,11 @@ void main() {
         dx = (px / plen) * defl - cfg.warpLean * py * win;
         dy = (py / plen) * defl;
       }
-      it.el.style.transform = 'translate(' + (dx * H).toFixed(1) + 'px,' + (dy * H).toFixed(1) + 'px)';
+      // camera zoom moves each link's anchor outward from center by (cz-1) and scales its
+      // bend by cz (matches the shader's p/iCamZoom). reduces to dx*H, dy*H when cz = 1.
+      const tx = ((cz - 1) * px + cz * dx) * H;
+      const ty = ((cz - 1) * py + cz * dy) * H;
+      it.el.style.transform = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px)';
     }
   }
 
@@ -372,6 +381,7 @@ void main() {
     uDriftScale = gl.getUniformLocation(prog, 'iDriftScale');
     uRipFreq = gl.getUniformLocation(prog, 'iRipFreq');
     uRipPhase = gl.getUniformLocation(prog, 'iRipPhase');
+    uCamZoom = gl.getUniformLocation(prog, 'iCamZoom');
     gl.uniform1i(gl.getUniformLocation(prog, 'iChannel0'), 0);
   }
 
@@ -510,6 +520,7 @@ void main() {
       }
     }
     addPresetPicker(initial);
+    addZoomControls();
     start();
   }
 
@@ -627,21 +638,28 @@ void main() {
     const relTau = REL_RIP_TAU * (1.0 + REL_RIP_TAU_K * Math.max(0.0, relM0 - 1.0));
     relRip *= Math.exp(-dt / relTau);
 
-    // the whirl, the largening, and the flare/color all ride the SAME exponential
-    // feed curve (feedPow), each with its own gain, so they ramp together (proportional).
-    // gentle at first as you start holding, then ramps up the longer you feed.
-    const diskSpeed = Math.min(feedPow(DISK_SPEED_K), DISK_SPEED_MAX); // cap so the whirl can't advect fast enough to alias/flicker at high fed mass
-    diskTime += dt * diskSpeed;
+    // real-time rate of the disk = a 1/M slowdown from BOTH masses, multiplied:
+    //  - per-PRESET mass: heavier presets orbit slower at rest (presetFreqScale, the SAME
+    //    log-compressed 1/M the ringdown uses -- orbital Omega and QNM frequency both go as 1/M).
+    //  - FED mass: feeding grows the hole self-similarly (feedPow) for a further 1/M, steepened by
+    //    DISK_SLOW_POW so the slowdown beats the zoom's apparent inner-material speedup (else it
+    //    looked like feeding FASTENED the swirl -- the zoom wins over a plain 1/M). see that const.
+    // floored on the product so a fed giant can't freeze. accumulated incrementally (not iTime*rate)
+    // so a smoothly-changing rate never jumps the phase.
+    const rtScale = Math.max(DISK_SPEED_FLOOR, presetFreqScale / feedPow(MASS_SIZE_K * DISK_SLOW_POW));
+    diskTime += dt * rtScale;
     const wrapT = cfg.diskCycle * 16.0;          // keep the disk clock TINY so feeding can't accumulate it into precision/aliasing flicker; 16 is an integer x cycle, so fract(t/cycle) (the only thing the disk reads) is unchanged -> invisible wrap
     while (diskTime > wrapT) diskTime -= wrapT;  // while-loop: a big feed burst can overshoot by more than one wrap in a frame
 
     // feeding is mostly a brightness flare + a subtle swell (not a zoom). the
     // responsive base size keeps the whole disk on-screen on narrow viewports.
     szEff = baseScale * presetScale * feedPow(MASS_SIZE_K);
-    const flare = feedPow(MASS_LUM_K);
+    const flare = feedPow(MASS_LUM_K) / feedPow(MASS_SIZE_K * FLARE_ZOOM_COMP); // intended flare, minus the zoom's brightness surge (see FLARE_ZOOM_COMP)
 
-    // infall phase grows while feeding, eases out on release; drives the disk's inward spiral
-    if (feeding) inflowPhase += dt * INFLOW_SPEED;
+    // infall phase grows while feeding, eases out on release; drives the disk's inward spiral.
+    // the inflow is a real-time rate too, so it gets the SAME 1/M slowdown as the swirl (a fed/
+    // heavier hole's matter also drifts in slower in wall-clock) -- keeps the two self-consistent.
+    if (feeding) inflowPhase += dt * INFLOW_SPEED * rtScale;
     else inflowPhase *= INFLOW_RELAX;
 
     // preset-change wobble: the new hole drops in and settles (decaying cosine,
@@ -668,6 +686,7 @@ void main() {
     gl.uniform1f(uDiskTime, diskTime);
     gl.uniform1f(uDriftScale, driftScale);
     gl.uniform1f(uMass, szEff);
+    gl.uniform1f(uCamZoom, camZoom);
     gl.uniform1f(uFlare, flare);
     gl.uniform1f(uInflow, inflowPhase);
     // spacetime vibration: feeding shakes the fabric (sustained) and the size *changing*
@@ -756,7 +775,8 @@ void main() {
       gl.uniform1f(uDiskTime, diskTime);
       szEff = baseScale * presetScale * feedPow(MASS_SIZE_K);
       gl.uniform1f(uMass, szEff);
-      gl.uniform1f(uFlare, feedPow(MASS_LUM_K));
+      gl.uniform1f(uCamZoom, camZoom);
+      gl.uniform1f(uFlare, feedPow(MASS_LUM_K) / feedPow(MASS_SIZE_K * FLARE_ZOOM_COMP));
       gl.uniform1f(uInflow, inflowPhase);
       gl.uniform1f(uRipple, 0.0); // no wobble ripple in the static (reduced-motion) frame
       gl.uniform1f(uDiskWob, 0.0);
@@ -964,6 +984,36 @@ void main() {
     wrap.appendChild(sel);
     document.body.appendChild(wrap);
     presetSelect = sel; // so the swipe gesture can keep the picker in sync
+  }
+
+  // apply + persist a manual zoom level (multiplies szEff). clamped; redraws the static
+  // frame under reduced motion (the live loop picks it up on its own next frame).
+  function setZoom(z) {
+    camZoom = Math.max(ZOOM_MIN, z); // no upper bound -> infinite zoom-in
+    try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (e) { /* private mode / file:// */ }
+    if (reduceMotion) start();
+  }
+
+  // bottom-right [-] [reset] [+] to CAMERA-zoom the whole scene in/out (desktop + mobile).
+  // buttons are <button>, which the press-guard already excludes, so tapping them never feeds
+  // the hole.
+  function addZoomControls() {
+    try { const z = parseFloat(localStorage.getItem('bh-zoom')); if (isFinite(z) && z > 0) camZoom = Math.max(ZOOM_MIN, z); } catch (e) { /* ignore */ }
+    const wrap = document.createElement('div');
+    wrap.className = 'bh-zoom';
+    const mk = function (sym, label, onClick) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bh-zoom-btn';
+      b.textContent = sym;
+      b.setAttribute('aria-label', label);
+      b.addEventListener('click', onClick);
+      return b;
+    };
+    wrap.appendChild(mk('−', 'zoom out', function () { setZoom(camZoom / ZOOM_STEP); })); // U+2212 minus
+    wrap.appendChild(mk('↺', 'reset zoom', function () { setZoom(1.0); }));               // back to 1x
+    wrap.appendChild(mk('+', 'zoom in', function () { setZoom(camZoom * ZOOM_STEP); }));
+    document.body.appendChild(wrap);
   }
 
   fetch('/assets/shaders/blackhole.frag', { cache: 'no-cache' }) // always revalidate so shader edits aren't served stale

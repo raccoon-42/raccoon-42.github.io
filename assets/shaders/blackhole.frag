@@ -28,6 +28,7 @@ uniform float     iDiskWob;     // transient tilt added to the disk inclination 
 uniform float     iDriftScale;  // 1 = autonomous sin-drift on; faded to 0 on mobile when the gyroscope drives the drift instead. set in blackhole.js
 uniform float     iRipFreq;     // ripple frequency scale (1 = baseline). <1 makes the fabric + disk ring as fewer/bigger/slower waves -- a heavier hole rings lower. set in blackhole.js
 uniform float     iRipPhase;    // accumulated ripple time-phase = integral of iRipFreq dt (wrapped). use THIS, not iTime, for the ripple's temporal term: a changing frequency must not jump the phase (which iTime*freq does, worse as iTime grows). set in blackhole.js
+uniform float     iCamZoom;    // manual CAMERA zoom: scales the screen->scene mapping around the hole, so the hole, disk, lensing AND background all zoom together (1 = none, >1 = zoom in / everything bigger). a FOV change, distinct from iMass (which grows the hole itself). set in blackhole.js
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -171,7 +172,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     L.temp *= 1.0 + (iFlare - 1.0) * TEMP_BLUE;   // accretion heats the disk -> bluer when fed
     L.incl += iDiskWob;                           // the disk nods/sloshes when the hole shakes or moves (0 at rest)
 
-    float rin  = max(L.inner, 1.6);
+    // disk inner edge is floored at the ISCO = 3 r_s (innermost stable circular orbit for a
+    // non-spinning hole = 6M, and r_s = 2M = 1 here). inside it there are no stable orbits, so
+    // the Keplerian velocity field + the zero-torque temperature boundary (tprof) below are only
+    // valid from here out. presets that asked for a tighter disk (M87/GARGANTUA 2.2, INFERNO/
+    // PURELENS 1.8) were implicitly Kerr (spin shrinks the ISCO); we render Schwarzschild, so we
+    // pin them to the a=0 ISCO for self-consistency. (Kerr lensing is the documented realism ceiling.)
+    float rin  = max(L.inner, 3.0);
     float rout = max(L.outer, rin + 0.5);
 
     // fixed, centered hole (no pomodoro / token modes)
@@ -183,8 +190,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float dil    = mix(1.0, DILATION_MIN, I);
     float shield = 1.0;                     // full-screen effect (nav clickability handled in JS)
 
-    // aspect-corrected frame centered on the hole (y in units of screen height)
-    vec2  p    = (uv - center) * vec2(aspect, 1.0);
+    // aspect-corrected frame centered on the hole (y in units of screen height).
+    // dividing by iCamZoom is a CAMERA zoom: a pixel maps to a smaller scene offset, so the
+    // shadow, disk, lensing + the sampled background ALL scale together around the hole.
+    vec2  p    = (uv - center) * vec2(aspect, 1.0) / iCamZoom;
     float plen = length(p);
 
     // screen <-> world mapping: shadow's angular size is B_CRIT r_s, wanted rh

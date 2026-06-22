@@ -243,3 +243,44 @@ body.bh-scene .bh-preset option {
     background: #0b0e15;
 }
 
+/* +/- canvas zoom, bottom-right (mirrors the preset's dark glass) */
+body.bh-scene .bh-zoom {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 5;
+    display: inline-flex;
+    flex-direction: row;
+    gap: 0.4em;
+}
+body.bh-scene .bh-zoom-btn {
+    box-sizing: border-box;
+    width: 1.95em;
+    height: 1.95em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 14px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #e6ebf3;
+    background-color: rgba(18, 22, 31, 0.55);
+    border: 1px solid rgba(150, 165, 195, 0.25);
+    border-radius: 6px;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+body.bh-scene .bh-zoom-btn:hover,
+body.bh-scene .bh-zoom-btn:focus-visible {
+    color: #fff;
+    border-color: rgba(150, 165, 195, 0.5);
+    outline: none;
+}
+body.bh-scene .bh-zoom-btn:active {
+    background-color: rgba(40, 48, 64, 0.7);
+}
+
