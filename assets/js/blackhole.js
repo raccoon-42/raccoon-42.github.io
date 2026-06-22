@@ -380,13 +380,15 @@ void main() {
     computePresetScale();
     currentPreset = name;
     presetFreqScale = presetMassFreqScale(name); // this hole's ringdown frequency from its mass
-    // a switched-in hole arrives FRESH: clear any leftover feed/collapse/ring state from
-    // the previous one, so nothing accumulates across switches (stuck size, pinned ripple,
-    // a stray collapse armed by a swipe-tap). the drop-in wobble (kickWobble) is the only
-    // motion a new hole should carry.
+    // a switched-in hole arrives fresh in SIZE/FEED state (clear a stuck size, a stray collapse,
+    // accumulated inflow), but the SPACETIME FABRIC RIPPLE is KEPT and adopted by the new hole
+    // (Ali: "keep the fabric, adopt it to the new black hole"): relRip + ripShown + ripPhase keep
+    // running so the wave carries across the swipe with no reset/dip, and ripFreqShown is NOT
+    // snapped -- render eases it toward the NEW preset's frequency so the wavelength morphs into
+    // the new hole's. its reach/size adapt for free too (the shader reads the new szEff).
     mass = 1.0; massTarget = 1.0; prevMass = 1.0; relM0 = 1.0;
-    collapsing = false; relT = 0; relRip = 0; ripShown = 0; feedSilence = 0; inflowPhase = 0; diskTime = 0;
-    ripFreqShown = presetFreqScale; // start the new hole at its own baseline frequency, not eased from the old one
+    collapsing = false; relT = 0; feedSilence = 0; inflowPhase = 0; diskTime = 0;
+    // intentionally NOT reset: relRip, ripShown, ripFreqShown, ripPhase (the fabric ripple persists + adopts)
     if (presetSelect && presetSelect.value !== name) presetSelect.value = name; // keep the picker in sync (swipe)
     try { localStorage.setItem('bh-preset', name); } catch (e) { /* private mode / file:// */ }
     resize();                    // resets viewport + iResolution + re-uploads the text texture for the new program
