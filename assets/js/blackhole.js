@@ -466,6 +466,13 @@ void main() {
     window.addEventListener('pointerdown', onPointerDown); // press: flare burst + starts the spin-up
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
+    // backstop: pointer events can DROP a pointerup under heavy load (an extreme pinch-zoom
+    // janks the frame), leaving a stale id in `pointers` -> every later single touch then
+    // reads as a 2nd finger -> beginPinch -> single-finger feed/pull/swipe stop working
+    // ("touch goes away"). TouchEvent.touches is the authoritative live set, so when it
+    // reaches 0 (all fingers physically up) we hard-reset the pinch state.
+    window.addEventListener('touchend', syncTouches);
+    window.addEventListener('touchcancel', syncTouches);
     document.addEventListener('mouseleave', onMouseLeave); // desktop: end the pull when the cursor leaves
     // a long press is a feed gesture here, not a context menu / text selection;
     // suppress the menu the browser would otherwise pop (Android especially)
@@ -864,6 +871,20 @@ void main() {
     }
   }
   function onMouseLeave() { pointerActive = false; pressed = false; }
+
+  // all fingers are physically up (touches.length === 0): clear any stale pinch/feed state
+  // a dropped pointerup may have left behind, so single-finger gestures work again. only acts
+  // at the safe all-up moment, so it can't clobber a live gesture; the swipe state (swTouch) is
+  // left for the trailing pointerup to consume.
+  function syncTouches(e) {
+    if (e.touches.length === 0 && (pointers.size || multiTouch)) {
+      pointers.clear();
+      multiTouch = false;
+      pressed = false;
+      pointerActive = false;
+      clearTimeout(touchFeedTimer);
+    }
+  }
 
   // device MOTION (mobile): the gravity-removed linear acceleration spikes on a SHAKE,
   // which feeds the hole like a hold (the tilt-roll "marble" was dropped as untunable;
