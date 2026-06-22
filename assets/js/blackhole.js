@@ -72,6 +72,15 @@
   const GYRO_RECENTER = 0.004;// per-reading drift of the neutral baseline toward the held angle (0 = never recenter; higher = forgets a held tilt sooner)
   const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
   const GYRO_SIGN_Y = 1.0;    // flip to -1 if forward/back tilt rolls the hole the wrong way on device
+  // direction comes from the GRAVITY VECTOR (devicemotion accelerationIncludingGravity),
+  // not Euler beta/gamma -- the gravity (x,y) projected onto the screen IS the true downhill
+  // direction, with no gimbal lock / cross-coupling (that was the "wanders off direction").
+  const GYRO_G_RANGE = 3.5;   // gravity component along a screen axis (m/s^2) that maps to the full GYRO_MAX (~21 deg of tilt: 9.81*sin21). lower = more sensitive
+  // shaking the phone feeds the hole like holding: linear acceleration (gravity removed)
+  // spikes on a shake; while the smoothed level stays above threshold it pours mass in.
+  const SHAKE_THRESH = 7.0;   // m/s^2 of linear accel above which it counts as "shaking" (a deliberate shake is ~10-25, a still hand ~0-2)
+  const SHAKE_TAU = 0.25;     // s: how long the shake level coasts between shake peaks, so the fast oscillation reads as one continuous feed (and a stop collapses like a release)
+  const SHAKE_FEED = 1.3;     // shaking feeds at this multiple of a hold's FEED_RATE (shaking hard pours faster than a steady hold)
 
   // per-preset black-hole masses (solar masses), driving a physically-ordered ringdown
   // frequency (heavier hole -> slower wobble + ripple, f ~ 1/M). M87* and GARGANTUA are
@@ -129,14 +138,16 @@ void main() {
   let diskTime = 0, lastMs = 0;                        // disk-streak warped clock (speed follows mass)
   let mass = 1.0, massTarget = 1.0, prevMass = 1.0;    // hole size: accumulates when fed, snaps back on release
   let relT = 0, relM0 = 1.0, collapsing = false;       // release collapse: the swift accelerating snap from fed mass back to baseline
-  let relRip = 0, wasPressed = false;                  // release ripple: the fabric keeps rippling after a feed (long, fades), the hole itself does not pulse
+  let relRip = 0, wasFeeding = false;                  // release ripple: the fabric keeps rippling after a feed (long, fades), the hole itself does not pulse
   let ripShown = 0;                                    // low-passed ripple actually sent to the shader (no single-frame steps -> no click jolt)
   let ripPhase = 0;                                    // accumulated ripple time-phase (integral of the freq scale); used instead of iTime so a changing freq can't jump the phase
   let ripFreqShown = 1.0;                              // low-passed frequency scale sent to the shader, so the ripple's wavelength can't snap in one frame (e.g. a click clearing the ring)
   let feedSilence = 0;                                 // 1 = feed ripple muted during a collapse; eases back to 0 so an interrupting click doesn't jolt the ring
   let prevHoleX = 0, prevHoleY = 0;                    // last hole-center offset, for the disk's motion-driven nod
   let gyroX = 0, gyroY = 0, gyroTX = 0, gyroTY = 0;    // gyro drift: hole offset + tilt-driven target (eased, marble-in-bowl)
-  let gyroBeta0 = null, gyroGamma0 = null;             // neutral tilt baseline (captured on first reading, then slowly recentered)
+  let gyroBeta0 = null, gyroGamma0 = null;             // orientation-fallback neutral tilt baseline (only used if devicemotion gives no gravity)
+  let gravX0 = null, gravY0 = null, motionActive = false; // gravity-vector neutral baseline + whether devicemotion is driving the direction
+  let shakeLevel = 0, shaking = false;                 // smoothed shake intensity (linear accel) + whether it's feeding the hole like a hold
   let gyroActive = false, gyroRequested = false, gyroPending = false; // gyro receiving data / iOS permission answered (one-shot) / request in flight
   const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
   let driftScale = 1.0;                                // 1 = autonomous sin-drift on; fades to 0 once the gyro takes over the drift
@@ -472,7 +483,7 @@ void main() {
       const DOE = window.DeviceOrientationEvent;
       if (DOE && typeof DOE.requestPermission !== 'function') {
         gyroRequested = true;
-        window.addEventListener('deviceorientation', onOrient); // Android / older iOS: no prompt
+        attachMotion(); // Android / older iOS: no prompt
       } else if (DOE) {
         GYRO_GESTURES.forEach(function (ev) { window.addEventListener(ev, enableGyro); });
       }
@@ -539,16 +550,24 @@ void main() {
     gyroY += (gyroTY - gyroY) * GYRO_EASE;
     driftScale += ((gyroActive ? 0.0 : 1.0) - driftScale) * 0.04;
 
-    // mass: holding pours mass in (grows the hole), capped. on release the fed mass
+    // shaking the phone feeds the hole like a hold (Ali: "shaking should act same as
+    // holding"). the shake level coasts down (SHAKE_TAU) between shake peaks so the fast
+    // oscillation reads as one sustained feed, and stopping collapses like a release.
+    // EITHER a finger press OR a shake counts as feeding.
+    shakeLevel *= Math.exp(-dt / SHAKE_TAU);
+    shaking = shakeLevel > SHAKE_THRESH;
+    const feeding = pressed || shaking;
+
+    // mass: feeding pours mass in (grows the hole), capped. on release the fed mass
     // COLLAPSES back to baseline along a swift, accelerating e^x curve (the "phiiuuuv"
     // snap): it hangs a beat, then rushes home. the collapse itself is SILENT -- the
     // spacetime fabric only rings AFTER it lands (the kick fires on completion, below).
-    if (pressed) {
+    if (feeding) {
       collapsing = false;
-      massTarget = Math.min(massTarget + FEED_RATE * dt, MASS_MAX);
-      mass += (massTarget - mass) * MASS_EASE;       // gentle pour-in while held
+      massTarget = Math.min(massTarget + FEED_RATE * (shaking ? SHAKE_FEED : 1.0) * dt, MASS_MAX);
+      mass += (massTarget - mass) * MASS_EASE;       // gentle pour-in while feeding
     } else {
-      if (wasPressed && mass > 1.001) { relM0 = mass; relT = 0; collapsing = true; } // just released: arm the snap from the fed size
+      if (wasFeeding && mass > 1.001) { relM0 = mass; relT = 0; collapsing = true; } // just released: arm the snap from the fed size
       if (collapsing) {
         relT += dt;
         const p = Math.min(relT / MASS_COLLAPSE_DUR, 1.0);
@@ -569,7 +588,7 @@ void main() {
       }
       massTarget = mass;
     }
-    wasPressed = pressed;
+    wasFeeding = feeding;
     // the post-collapse ring damps out over a time-constant that scales with the fed mass:
     // a long hold (heavy hole) rings for several seconds, a tap fades in ~a second (tau ~ M).
     const relTau = REL_RIP_TAU * (1.0 + REL_RIP_TAU_K * Math.max(0.0, relM0 - 1.0));
@@ -588,8 +607,8 @@ void main() {
     szEff = baseScale * presetScale * feedPow(MASS_SIZE_K);
     const flare = feedPow(MASS_LUM_K);
 
-    // infall phase grows while held, eases out on release; drives the disk's inward spiral
-    if (pressed) inflowPhase += dt * INFLOW_SPEED;
+    // infall phase grows while feeding, eases out on release; drives the disk's inward spiral
+    if (feeding) inflowPhase += dt * INFLOW_SPEED;
     else inflowPhase *= INFLOW_RELAX;
 
     // preset-change wobble: the new hole drops in and settles (decaying cosine,
@@ -641,9 +660,9 @@ void main() {
     // the max is what stops the flicker: otherwise a new press snaps the frequency back to
     // ~1 (30 rings) while a big leftover ring is still at high amplitude, and high amp x
     // high freq aliases the lensed text into a shimmer that compounds across repeats.
-    const ringing = relRip > 0.02 && !pressed; // a post-collapse release ring is the active driver (not a live feed)
+    const ringing = relRip > 0.02 && !feeding; // a post-collapse release ring is the active driver (not a live feed/shake)
     const ringMass = ringing ? relM0 : 1.0;
-    const freqMass = Math.max(pressed ? mass : 1.0, ringMass);
+    const freqMass = Math.max(feeding ? mass : 1.0, ringMass);
     // combine the preset's baseline ringdown (its real mass) with the interactive fed-mass
     // slowdown, so a heavy hole ripples slower at rest AND slows further as you feed it.
     // the release ring drops further (REL_RIP_FREQ) so its waves roll out slow + big + felt.
@@ -785,10 +804,11 @@ void main() {
   }
   function onMouseLeave() { pointerActive = false; pressed = false; }
 
-  // gyroscope drift (mobile). tilt feeds a bounded, baseline-relative target the hole
-  // eases toward in render() (marble in a bowl). a slow baseline recenter keeps a held
-  // tilt from parking the hole off-screen. portrait hold: gamma = left/right, beta = front/back.
+  // FALLBACK direction from orientation Euler angles (gamma=L/R, beta=fwd/back). only used
+  // when devicemotion gives no gravity vector -- beta/gamma gimbal-lock + cross-couple, which
+  // is what made the marble "wander off direction"; onMotion's gravity vector is preferred.
   function onOrient(e) {
+    if (motionActive) return;                      // devicemotion owns the (truer) direction
     if (e.beta == null || e.gamma == null) return; // no real sensor (desktop): leave the sin-drift on
     gyroActive = true;                             // -> render() fades the autonomous drift out
     if (gyroBeta0 == null) { gyroBeta0 = e.beta; gyroGamma0 = e.gamma; } // capture the neutral hold
@@ -797,6 +817,26 @@ void main() {
     const dB = e.beta - gyroBeta0, dG = e.gamma - gyroGamma0;
     gyroTX = clamp1(GYRO_SIGN_X * dG / GYRO_RANGE) * GYRO_MAX; // tilt right -> hole rolls right (downhill)
     gyroTY = clamp1(GYRO_SIGN_Y * dB / GYRO_RANGE) * GYRO_MAX; // tilt forward/back -> rolls down/up
+  }
+
+  // device MOTION (mobile, preferred). the GRAVITY vector projected onto the screen (x,y) is
+  // the TRUE downhill direction with no gimbal lock -> the marble rolls where it should. and
+  // the gravity-removed linear acceleration spikes on a SHAKE -> feeds the hole like a hold.
+  function onMotion(e) {
+    const g = e.accelerationIncludingGravity;
+    if (g && g.x != null && g.y != null) {
+      motionActive = true; gyroActive = true;             // onOrient steps aside, drift fades out
+      if (gravX0 == null) { gravX0 = g.x; gravY0 = g.y; } // capture the neutral hold pose
+      gravX0 += (g.x - gravX0) * GYRO_RECENTER;           // slowly forget a sustained tilt
+      gravY0 += (g.y - gravY0) * GYRO_RECENTER;
+      gyroTX = clamp1(GYRO_SIGN_X * (g.x - gravX0) / GYRO_G_RANGE) * GYRO_MAX;
+      gyroTY = clamp1(GYRO_SIGN_Y * (g.y - gravY0) / GYRO_G_RANGE) * GYRO_MAX;
+    }
+    const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake
+    if (a && a.x != null) {
+      const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+      if (mag > shakeLevel) shakeLevel = mag;             // peak-hold; render() coasts it down (SHAKE_TAU)
+    }
   }
   function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
@@ -810,7 +850,7 @@ void main() {
     if (!DOE) return;
     if (typeof DOE.requestPermission !== 'function') { // Android / older iOS: no prompt
       gyroRequested = true;
-      window.addEventListener('deviceorientation', onOrient);
+      attachMotion();
       return;
     }
     // iOS 13+: the prompt needs transient user activation. mark the request in flight (NOT
@@ -820,8 +860,15 @@ void main() {
     DOE.requestPermission().then(function (s) {
       gyroRequested = true; gyroPending = false;            // iOS answered: stop retrying
       GYRO_GESTURES.forEach(function (ev) { window.removeEventListener(ev, enableGyro); });
-      if (s === 'granted') window.addEventListener('deviceorientation', onOrient);
+      if (s === 'granted') attachMotion();
     }).catch(function () { gyroPending = false; /* no activation: next gesture retries */ });
+  }
+
+  // attach both sensor streams: devicemotion (gravity direction + shake feed, preferred) and
+  // deviceorientation (Euler fallback). on iOS the single granted Motion permission covers both.
+  function attachMotion() {
+    window.addEventListener('devicemotion', onMotion);
+    window.addEventListener('deviceorientation', onOrient);
   }
 
   // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
