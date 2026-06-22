@@ -559,7 +559,12 @@ void main() {
     // COLLAPSES back to baseline along a swift, accelerating e^x curve (the "phiiuuuv"
     // snap): it hangs a beat, then rushes home. the collapse itself is SILENT -- the
     // spacetime fabric only rings AFTER it lands (the kick fires on completion, below).
-    if (feeding) {
+    if (multiTouch) {
+      // pinch in progress: FREEZE the fed size (no feed, no collapse) so a held feed survives
+      // the zoom and resumes when you go back to one finger (onPointerUp). a mass>1 keeps the
+      // fabric rippling steadily through the pinch too (feedRip below reads off mass).
+      massTarget = mass;
+    } else if (feeding) {
       collapsing = false;
       massTarget = Math.min(massTarget + FEED_RATE * (shaking ? SHAKE_FEED : 1.0) * dt, MASS_MAX);
       mass += (massTarget - mass) * MASS_EASE;       // gentle pour-in while feeding
@@ -784,18 +789,17 @@ void main() {
   }
 
   // a second finger landed: switch from feed/pull to a pinch that drives the camera zoom.
-  // the first finger's feed was DEFERRED (touchFeedTimer), so cancelling it here normally
-  // leaves the hole untouched (mass still 1) -> a pinch never feeds or flares. if the first
-  // finger had already been held long enough to start feeding, ease that mass back smoothly
-  // (collapse) instead of hard-snapping it. also undo any pull the first finger drifted in.
+  // the fed mass + any release ring are FROZEN by render while multiTouch (no feed, no
+  // collapse, no reset) -- so a finger that was holding/feeding survives the pinch and resumes
+  // when you go back to one finger (onPointerUp 2->1). a fresh pinch (the first finger's feed
+  // was still deferred) freezes at mass=1, so it neither feeds nor flares. also undo any pull
+  // the first finger drifted in. don't touch mass/relRip here -- that's what kept the 2nd
+  // finger from breaking the first's attribution + the ripple alive through the zoom.
   function beginPinch() {
     multiTouch = true;
     clearTimeout(touchFeedTimer);
     pressed = false; pointerActive = false; pullTouch = false; swTouch = false;
     velX = 0; velY = 0; pullX = swPullX; pullY = swPullY;
-    if (mass > 1.001) { relM0 = mass; relT = 0; collapsing = true; } // was already feeding: ease back, no snap
-    else { mass = 1.0; massTarget = 1.0; collapsing = false; }       // the common case: nothing was fed
-    wasFeeding = false; relRip = 0;
     const pts = Array.from(pointers.values());
     pinchDist = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1e-3);
     pinchZoom0 = camZoom;
@@ -842,6 +846,17 @@ void main() {
     if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
     if (multiTouch) {                          // lifting a finger out of a pinch
       if (pointers.size < 2) { try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (err) { /* private mode / file:// */ } }
+      if (pointers.size === 1) {
+        // back to a single finger: HAND THE GESTURE BACK to the finger still down instead of
+        // sitting inert until every finger lifts. a finger that was holding/feeding before the
+        // pinch resumes feeding + pulling toward where it now is -- introducing (then lifting) a
+        // 2nd finger no longer breaks the first finger's attribution.
+        multiTouch = false;
+        const pt = pointers.values().next().value;
+        if (pt) { tgtPullX = (pt.x / window.innerWidth - 0.5) * CURSOR_PULL; tgtPullY = (pt.y / window.innerHeight - 0.5) * CURSOR_PULL; }
+        pointerActive = true; pullTouch = true; pressed = true; swTouch = false;
+        return;
+      }
       if (pointers.size === 0) multiTouch = false; // all fingers up: single-finger feed/pull/swipe re-enabled
       pressed = false; pointerActive = false;
       return;                                  // a pinch release never feeds or cycles presets

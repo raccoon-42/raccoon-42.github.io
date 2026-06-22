@@ -217,10 +217,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // (sz = iMass), so a big/fed shadow ripples across its visible rim instead of the
     // wave dying right at the edge -- the "large hole has no visible ripple" case (worst
     // on mobile, where the shadow eats most of the screen). floored + capped on sz.
-    float ripReach = clamp(sz, 1.0, 3.0) / RIPPLE_FALL;
-    float rip = iRipple * RIPPLE_AMP
-              * sin(plen * RIPPLE_FREQ * iRipFreq - iRipPhase * RIPPLE_SPEED)
-              * smoothstep(rh, 1.5 * rh, plen) * exp(-max(plen - rh, 0.0) / ripReach);
+    // CAMERA-ZOOM INVARIANCE: do the wave spacing, fade reach and displacement in SCREEN space
+    // (multiply the scene radius by iCamZoom), so a pinch/zoom-in keeps the SAME on-screen ripple
+    // instead of stretching the rings into one slow bulge with an oversized throw -- that was the
+    // "fabric ripple stops when you zoom in". the band stays in scene units (smoothstep(rh,1.5rh,
+    // plen) is unchanged by the shared iCamZoom scale, so it still tracks the shadow edge). every
+    // term reduces to the original at iCamZoom = 1.
+    float plenS    = plen * iCamZoom;                       // screen-space radius (height units)
+    float ripReach = clamp(sz, 1.0, 3.0) / RIPPLE_FALL;    // now in screen-height units
+    float rip = iRipple * RIPPLE_AMP / max(iCamZoom, 1e-4) // /zoom keeps the on-screen throw constant
+              * sin(plenS * RIPPLE_FREQ * iRipFreq - iRipPhase * RIPPLE_SPEED)
+              * smoothstep(rh, 1.5 * rh, plen) * exp(-max(plenS - rh * iCamZoom, 0.0) / ripReach);
     vec2  ripOff = (p / max(plen, 1e-5)) * rip;
 
     float bmax = rout + 3.0;                // rays beyond this can't touch the disk
