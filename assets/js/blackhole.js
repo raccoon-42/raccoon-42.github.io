@@ -68,7 +68,7 @@
   // ON TOP of the finger pull and, while live, replaces the autonomous sin-drift.
   const GYRO_MAX = 0.42;      // max uv offset a tilt can push the hole. 0.42 lets it roll right out to the screen edges (center 0.5 +/- this); lower = stays more central
   const GYRO_RANGE = 32.0;    // degrees of tilt from baseline that map to the full GYRO_MAX
-  const GYRO_EASE = 0.05;     // how heavily the hole rolls toward the tilt target (low = laggier, heavier marble)
+  const GYRO_EASE = 0.018;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 since the wider GYRO_MAX made the same ease cover much more distance per frame -> too fast
   const GYRO_RECENTER = 0.0006;// per-reading drift of the neutral baseline toward the held angle. KEPT TINY so a held tilt PERSISTS (hole stays pushed to the edge, doesn't fade back); just enough that a permanent pose change eventually re-neutralizes over ~30s. 0 = never recenter
   const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
   const GYRO_SIGN_Y = 1.0;    // flip to -1 if forward/back tilt rolls the hole the wrong way on device
