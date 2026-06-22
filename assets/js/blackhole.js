@@ -137,7 +137,8 @@ void main() {
   let prevHoleX = 0, prevHoleY = 0;                    // last hole-center offset, for the disk's motion-driven nod
   let gyroX = 0, gyroY = 0, gyroTX = 0, gyroTY = 0;    // gyro drift: hole offset + tilt-driven target (eased, marble-in-bowl)
   let gyroBeta0 = null, gyroGamma0 = null;             // neutral tilt baseline (captured on first reading, then slowly recentered)
-  let gyroActive = false, gyroRequested = false;       // gyro receiving data / permission already asked (iOS one-shot)
+  let gyroActive = false, gyroRequested = false, gyroPending = false; // gyro receiving data / iOS permission answered (one-shot) / request in flight
+  const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
   let driftScale = 1.0;                                // 1 = autonomous sin-drift on; fades to 0 once the gyro takes over the drift
   let baseScale = 1.0, szEff = 1.0;                    // responsive base size (per viewport) x the fed size
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
@@ -464,13 +465,16 @@ void main() {
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
     // gyro drift: Android exposes the sensor with no prompt, so attach it now for
-    // instant tilt. iOS requires a permission request from a user gesture -> deferred
-    // to the first tap (enableGyro, called in onPointerDown).
+    // instant tilt. iOS 13+ requires a permission request from a user gesture -> we arm
+    // the COMPLETED-gesture events and let the first one trigger the prompt (a bare
+    // pointerdown/touchstart often lacks the activation Safari needs).
     if (!reduceMotion && isCoarse) {
       const DOE = window.DeviceOrientationEvent;
       if (DOE && typeof DOE.requestPermission !== 'function') {
         gyroRequested = true;
-        window.addEventListener('deviceorientation', onOrient);
+        window.addEventListener('deviceorientation', onOrient); // Android / older iOS: no prompt
+      } else if (DOE) {
+        GYRO_GESTURES.forEach(function (ev) { window.addEventListener(ev, enableGyro); });
       }
     }
     addPresetPicker(initial);
@@ -743,7 +747,6 @@ void main() {
   // a press on a control (the preset picker, a link, a button) shouldn't feed.
   // a touch press also starts swipe tracking (a horizontal swipe cycles presets).
   function onPointerDown(e) {
-    enableGyro(); // iOS: the first tap is the user gesture that unlocks the gyro permission (no-op after / on Android)
     swTouch = false;
     if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input')) return;
     if (e.pointerType !== 'mouse') { swTouch = true; swX = e.clientX; swY = e.clientY; swT = e.timeStamp; swPullX = pullX; swPullY = pullY; }
@@ -798,20 +801,27 @@ void main() {
   function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
   // wire up the gyro. iOS 13+ gates DeviceOrientation behind a permission prompt that
-  // must be requested from inside a user gesture, so there we wait for the first tap
-  // (called from onPointerDown). Android has no prompt and is attached at init instead.
+  // must be requested from inside a user gesture, so init arms GYRO_GESTURES (completed
+  // taps) and the first one calls this; it retries until iOS answers, then disarms them.
+  // Android / older iOS have no prompt and are attached directly at init instead.
   function enableGyro() {
-    if (gyroRequested || reduceMotion || !isCoarse) return;
+    if (gyroRequested || gyroPending || reduceMotion || !isCoarse) return;
     const DOE = window.DeviceOrientationEvent;
     if (!DOE) return;
-    gyroRequested = true;
-    if (typeof DOE.requestPermission === 'function') {
-      DOE.requestPermission().then(function (s) {
-        if (s === 'granted') window.addEventListener('deviceorientation', onOrient);
-      }).catch(function () { /* denied / not a gesture: the sin-drift just stays on */ });
-    } else {
+    if (typeof DOE.requestPermission !== 'function') { // Android / older iOS: no prompt
+      gyroRequested = true;
       window.addEventListener('deviceorientation', onOrient);
+      return;
     }
+    // iOS 13+: the prompt needs transient user activation. mark the request in flight (NOT
+    // done) so that if this gesture lacked activation and the promise rejects, the next
+    // completed tap can retry instead of being locked out by an early gyroRequested=true.
+    gyroPending = true;
+    DOE.requestPermission().then(function (s) {
+      gyroRequested = true; gyroPending = false;            // iOS answered: stop retrying
+      GYRO_GESTURES.forEach(function (ev) { window.removeEventListener(ev, enableGyro); });
+      if (s === 'granted') window.addEventListener('deviceorientation', onOrient);
+    }).catch(function () { gyroPending = false; /* no activation: next gesture retries */ });
   }
 
   // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
