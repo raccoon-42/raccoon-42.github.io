@@ -75,7 +75,8 @@
   // direction comes from the GRAVITY VECTOR (devicemotion accelerationIncludingGravity),
   // not Euler beta/gamma -- the gravity (x,y) projected onto the screen IS the true downhill
   // direction, with no gimbal lock / cross-coupling (that was the "wanders off direction").
-  const GYRO_G_RANGE = 3.5;   // gravity component along a screen axis (m/s^2) that maps to the full GYRO_MAX (~21 deg of tilt: 9.81*sin21). lower = more sensitive
+  const GYRO_G_RANGE = 3.5;   // LEFT/RIGHT: gravity component (m/s^2) that maps to the full GYRO_MAX (~21 deg of tilt: 9.81*sin21). lower = more sensitive
+  const GYRO_G_RANGE_Y = 2.0; // FORWARD/BACK gets its own, smaller (more sensitive) range: held at a viewing angle, the vertical gravity component changes much less per degree of fwd/back tilt than left/right roll does, so vertical felt weak/asymmetric. lower = more sensitive
   // shaking the phone feeds the hole like holding: linear acceleration (gravity removed)
   // spikes on a shake; while the smoothed level stays above threshold it pours mass in.
   const SHAKE_THRESH = 7.0;   // m/s^2 of linear accel above which it counts as "shaking" (a deliberate shake is ~10-25, a still hand ~0-2)
@@ -830,7 +831,7 @@ void main() {
       gravX0 += (g.x - gravX0) * GYRO_RECENTER;           // slowly forget a sustained tilt
       gravY0 += (g.y - gravY0) * GYRO_RECENTER;
       gyroTX = clamp1(GYRO_SIGN_X * (g.x - gravX0) / GYRO_G_RANGE) * GYRO_MAX;
-      gyroTY = clamp1(GYRO_SIGN_Y * (g.y - gravY0) / GYRO_G_RANGE) * GYRO_MAX;
+      gyroTY = clamp1(GYRO_SIGN_Y * (g.y - gravY0) / GYRO_G_RANGE_Y) * GYRO_MAX;
     }
     const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake
     if (a && a.x != null) {
