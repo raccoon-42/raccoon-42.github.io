@@ -7,6 +7,14 @@ body.bh-scene {
     color: #e6edf3;
     overflow: hidden;                 /* full-viewport scene, no scroll */
     overscroll-behavior: none;        /* keep vertical swipes ours (no pull-to-refresh/overscroll) */
+    /* the scene owns its touch gestures (feed/swipe), so stop the browser from
+       hijacking a long press: no selection/lookup/share callout, no magnifier,
+       no pan/zoom/double-tap. taps + the picker/links still work normally. */
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 #blackhole-canvas {

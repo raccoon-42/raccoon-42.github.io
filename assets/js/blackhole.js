@@ -356,6 +356,9 @@ void main() {
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
     document.addEventListener('mouseleave', onMouseLeave); // desktop: end the pull when the cursor leaves
+    // a long press is a feed gesture here, not a context menu / text selection;
+    // suppress the menu the browser would otherwise pop (Android especially)
+    window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     addPresetPicker(initial);
     start();
   }
