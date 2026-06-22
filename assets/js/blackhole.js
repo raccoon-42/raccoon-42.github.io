@@ -64,38 +64,6 @@
   const DISK_WOB_W = 1.3;    // the disk nods with the wobble's shake (radians of inclination per unit wobble offset)
   const DISK_WOB_V = 7.0;    // the disk nods with the hole's drag velocity (radians per unit per-frame motion)
 
-  // gyroscope "marble in a bowl" drift (mobile): tilt the phone and the heavy hole
-  // rolls toward the low edge. tilt feeds a bounded target; the hole eases toward it
-  // with the same heavy gravitational lag (no snap, no bounce). a slow baseline
-  // recenter keeps a sustained tilt from parking the hole off-screen. this composes
-  // ON TOP of the finger pull and, while live, replaces the autonomous sin-drift.
-  const GYRO_MAX = 0.42;      // max uv offset a tilt can push the hole. 0.42 lets it roll right out to the screen edges (center 0.5 +/- this); lower = stays more central
-  const GYRO_RANGE = 32.0;    // degrees of tilt from baseline that map to the full GYRO_MAX
-  const GYRO_EASE = 0.007;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 -> 0.018 -> 0.011 -> 0.007 as it kept feeling too fast; the wider GYRO_MAX makes the same ease cover a lot of distance per frame
-  const GYRO_DEAD = 0.16;     // deadzone: fraction of the tilt range near neutral that produces NO movement, so small/incidental tilts don't drift the hole. re-normalized past the deadzone, so a full tilt still reaches the edge (just needs a deliberate tilt to start). 0 = react to the slightest motion
-  const GYRO_RECENTER = 0.0006;// per-reading drift of the neutral baseline toward the held angle. KEPT TINY so a held tilt PERSISTS (hole stays pushed to the edge, doesn't fade back); just enough that a permanent pose change eventually re-neutralizes over ~30s. 0 = never recenter
-  const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
-  const GYRO_SIGN_Y = 1.0;    // flip to -1 if forward/back tilt rolls the hole the wrong way on device
-  // direction comes from the GRAVITY VECTOR (devicemotion accelerationIncludingGravity),
-  // not Euler beta/gamma -- the gravity (x,y) projected onto the screen IS the true downhill
-  // direction, with no gimbal lock / cross-coupling (that was the "wanders off direction").
-  const GYRO_G_RANGE = 3.5;   // LEFT/RIGHT: gravity component (m/s^2) that maps to the full GYRO_MAX (~21 deg of tilt: 9.81*sin21). lower = more sensitive
-  const GYRO_G_RANGE_Y = 2.0; // FORWARD/BACK gets its own, smaller (more sensitive) range: held at a viewing angle, the vertical gravity component changes much less per degree of fwd/back tilt than left/right roll does, so vertical felt weak/asymmetric. lower = more sensitive
-  // STABILITY: the raw gravity vector jitters (hand tremor, sensor noise, the shake feed
-  // bleeding into it) -> the tilt felt "unstable". low-pass it into a steady gravity
-  // estimate BEFORE deriving the tilt, so only deliberate tilts move the marble. this is
-  // the accelerometer half of the sensor fusion (the gyro/ease handles short-term lag).
-  const GRAV_LP = 0.86;       // gravity low-pass weight (kept fraction of the previous estimate per reading). higher = steadier but laggier tilt; lower = snappier but jitterier. 0 = raw (no smoothing)
-  // SHOVE: physically flicking/sliding the phone -- the GRAVITY-REMOVED linear acceleration
-  // (e.acceleration) -- knocks the hole with a transient push that springs back, like a
-  // heavy mass you can shove. separate from the tilt roll and from the shake feed.
-  const SHOVE_GAIN = 0.011;   // uv velocity kicked into the hole per m/s^2 of linear accel above the deadzone. higher = a flick throws the hole harder
-  const SHOVE_DRAG = 0.84;    // per-frame damping on the shove velocity (lower = the knock dies quicker, less coast)
-  const SHOVE_RETURN = 0.90;  // per-frame spring of the shoved offset back to center (lower = snaps home faster; this is what makes it "settle back")
-  const SHOVE_MAX = 0.28;     // cap on the shove offset (uv) so a hard flick can't fling the hole off-screen
-  const SHOVE_DEAD = 1.5;     // m/s^2 of linear accel below which it's ignored: a still/slightly-trembling hand reads ~0-2 per axis, so this rejects rest noise and only a deliberate flick (~5-15+) shoves -> no jitter
-  const SHOVE_SIGN_X = 1.0;   // flip to -1 if a left/right flick shoves the hole the wrong way
-  const SHOVE_SIGN_Y = 1.0;   // flip to -1 if an up/down flick shoves the hole the wrong way
   // shaking the phone feeds the hole like holding: linear acceleration (gravity removed)
   // spikes on a shake; while the smoothed level stays above threshold it pours mass in.
   const SHAKE_THRESH = 7.0;   // m/s^2 of linear accel above which it counts as "shaking" (a deliberate shake is ~10-25, a still hand ~0-2)
@@ -164,17 +132,10 @@ void main() {
   let ripFreqShown = 1.0;                              // low-passed frequency scale sent to the shader, so the ripple's wavelength can't snap in one frame (e.g. a click clearing the ring)
   let feedSilence = 0;                                 // 1 = feed ripple muted during a collapse; eases back to 0 so an interrupting click doesn't jolt the ring
   let prevHoleX = 0, prevHoleY = 0;                    // last hole-center offset, for the disk's motion-driven nod
-  let gyroX = 0, gyroY = 0, gyroTX = 0, gyroTY = 0;    // gyro drift: hole offset + tilt-driven target (eased, marble-in-bowl)
-  let gyroBeta0 = null, gyroGamma0 = null;             // orientation-fallback neutral tilt baseline (only used if devicemotion gives no gravity)
-  let gravX0 = null, gravY0 = null, motionActive = false; // gravity-vector neutral baseline + whether devicemotion is driving the direction
-  let gyroWarm = 0;                                    // readings since gyro woke: the baseline settles fast for the first few so the activation-tap pose isn't frozen in as a lopsided "neutral"
-  let gravLpX = 0, gravLpY = 0, gravLpInit = false;   // low-pass gravity estimate (steady tilt source -- raw gravity is too jittery)
-  let accPkX = 0, accPkY = 0;                          // peak linear-accel sample since last frame (gravity removed), consumed by the shove
-  let shoveX = 0, shoveY = 0, shoveVX = 0, shoveVY = 0; // shove offset + velocity: a phone flick knocks the hole, it springs back
   let shakeLevel = 0, shaking = false;                 // smoothed shake intensity (linear accel) + whether it's feeding the hole like a hold
-  let gyroActive = false, gyroRequested = false, gyroPending = false; // gyro receiving data / iOS permission answered (one-shot) / request in flight
-  const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
-  let driftScale = 1.0;                                // 1 = autonomous sin-drift on; fades to 0 once the gyro takes over the drift
+  let motionRequested = false, motionPending = false;  // iOS motion permission answered (one-shot) / request in flight
+  const MOTION_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
+  let driftScale = 1.0;                                // autonomous sin-drift scale (always on; kept as a uniform the shader reads)
   let baseScale = 1.0, szEff = 1.0;                    // responsive base size (per viewport) x the fed size
   let camZoom = 1.0;                                    // manual +/- CAMERA zoom (FOV: scales the whole scene -- hole, disk, lensing, background -- together); via iCamZoom; persisted in localStorage
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
@@ -186,6 +147,10 @@ void main() {
   let currentPreset = '';    // the active preset name (kept in sync between the picker + swipe)
   let presetSelect = null;   // the picker <select>, so swipe can keep it in sync
   let swTouch = false, swX = 0, swY = 0, swT = 0, swPullX = 0, swPullY = 0; // touch swipe tracking (+ pull at gesture start, to undo it on a swipe)
+  const pointers = new Map();                               // active touch pointers (pointerId -> {x,y}) for pinch detection
+  let multiTouch = false, pinchDist = 0, pinchZoom0 = 1.0;  // pinch-to-zoom: 2 fingers drive camZoom; suppress single-finger feed/pull/swipe while >=2 down
+  let touchFeedTimer = 0;                                   // a single touch defers its feed by TOUCH_FEED_DELAY so a 2nd finger (pinch) cancels it BEFORE any feed/flare happens
+  const TOUCH_FEED_DELAY = 70;                              // ms to wait; a deliberate hold still feeds (just imperceptibly later), a pinch never does
   let wobAge = 1e9, wobDX = 0, wobDY = 0, wobX = 0, wobY = 0, wobSwell = 0, wobRip = 0; // preset-change "drop" wobble (2D throw + size swell + fabric ripple)
   let wobW = WOBBLE_OMEGA, wobZ = WOBBLE_ZETA;              // per-change natural frequency + damping ratio (set on kick)
   const tcvs = document.createElement('canvas');
@@ -297,8 +262,8 @@ void main() {
   function holeCenterUV(time) {
     const s = time * cfg.driftSpeed * 0.15;
     return {
-      x: 0.5 + cfg.driftAmt * driftScale * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX + gyroX + shoveX,
-      y: 0.5 + cfg.driftAmt * driftScale * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY + gyroY + shoveY,
+      x: 0.5 + cfg.driftAmt * driftScale * (0.75 * Math.sin(s * 0.37) + 0.25 * Math.sin(s * 0.83 + 1.0)) + pullX + wobX,
+      y: 0.5 + cfg.driftAmt * driftScale * (0.70 * Math.sin(s * 0.54 + 2.1) + 0.30 * Math.sin(s * 1.07)) + pullY + wobY,
     };
   }
 
@@ -506,17 +471,17 @@ void main() {
     // suppress the menu the browser would otherwise pop (Android especially)
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
-    // gyro drift: Android exposes the sensor with no prompt, so attach it now for
-    // instant tilt. iOS 13+ requires a permission request from a user gesture -> we arm
-    // the COMPLETED-gesture events and let the first one trigger the prompt (a bare
-    // pointerdown/touchstart often lacks the activation Safari needs).
+    // shake-to-feed: Android exposes devicemotion with no prompt, so attach it now.
+    // iOS 13+ requires a permission request from a user gesture -> we arm the COMPLETED-
+    // gesture events and let the first one trigger the prompt (a bare pointerdown/
+    // touchstart often lacks the activation Safari needs).
     if (!reduceMotion && isCoarse) {
-      const DOE = window.DeviceOrientationEvent;
-      if (DOE && typeof DOE.requestPermission !== 'function') {
-        gyroRequested = true;
+      const DME = window.DeviceMotionEvent;
+      if (DME && typeof DME.requestPermission !== 'function') {
+        motionRequested = true;
         attachMotion(); // Android / older iOS: no prompt
-      } else if (DOE) {
-        GYRO_GESTURES.forEach(function (ev) { window.addEventListener(ev, enableGyro); });
+      } else if (DME) {
+        MOTION_GESTURES.forEach(function (ev) { window.addEventListener(ev, enableMotion); });
       }
     }
     addPresetPicker(initial);
@@ -574,25 +539,6 @@ void main() {
       pullX += velX; pullY += velY;             // mouse released: coast on last velocity
       velX *= PULL_FRICTION; velY *= PULL_FRICTION;
     }
-
-    // gyro marble-in-bowl: the hole eases toward the tilt-driven target (heavy lag,
-    // no snap). once the gyro is live it owns the ambient drift, so the autonomous
-    // sin-drift fades out (driftScale -> 0); if the gyro is denied/absent it stays.
-    gyroX += (gyroTX - gyroX) * GYRO_EASE;
-    gyroY += (gyroTY - gyroY) * GYRO_EASE;
-    driftScale += ((gyroActive ? 0.0 : 1.0) - driftScale) * 0.04;
-
-    // linear-acceleration SHOVE: a flick/slide of the phone (gravity-removed accel, peak-held
-    // since the last frame) kicks the shove velocity; drag bleeds it and a spring returns the
-    // offset to center -> the hole lurches with the motion then settles, a heavy knock. the
-    // deadzone means a steady hand never shoves (stability). this rides ON TOP of the tilt roll.
-    const adx = Math.abs(accPkX) > SHOVE_DEAD ? accPkX : 0.0;
-    const ady = Math.abs(accPkY) > SHOVE_DEAD ? accPkY : 0.0;
-    accPkX = 0; accPkY = 0;                                   // consume this frame's flick peak
-    shoveVX = shoveVX * SHOVE_DRAG + SHOVE_SIGN_X * adx * SHOVE_GAIN;
-    shoveVY = shoveVY * SHOVE_DRAG + SHOVE_SIGN_Y * ady * SHOVE_GAIN;
-    shoveX = Math.max(-SHOVE_MAX, Math.min((shoveX + shoveVX) * SHOVE_RETURN, SHOVE_MAX));
-    shoveY = Math.max(-SHOVE_MAX, Math.min((shoveY + shoveVY) * SHOVE_RETURN, SHOVE_MAX));
 
     // shaking the phone feeds the hole like a hold (Ali: "shaking should act same as
     // holding"). the shake level coasts down (SHAKE_TAU) between shake peaks so the fast
@@ -682,7 +628,7 @@ void main() {
     szEff *= (1.0 + wobSwell);           // the impact swell deepens the lensing
 
     gl.uniform1f(uTime, t);
-    gl.uniform2f(uCursor, pullX + wobX + gyroX + shoveX, pullY + wobY + gyroY + shoveY);
+    gl.uniform2f(uCursor, pullX + wobX, pullY + wobY);
     gl.uniform1f(uDiskTime, diskTime);
     gl.uniform1f(uDriftScale, driftScale);
     gl.uniform1f(uMass, szEff);
@@ -712,7 +658,12 @@ void main() {
     // the max is what stops the flicker: otherwise a new press snaps the frequency back to
     // ~1 (30 rings) while a big leftover ring is still at high amplitude, and high amp x
     // high freq aliases the lensed text into a shimmer that compounds across repeats.
-    const ringing = relRip > 0.02 && !feeding; // a post-collapse release ring is the active driver (not a live feed/shake)
+    // a still-significant release ring keeps OWNING the frequency even if a new feed has started
+    // (no `!feeding`): otherwise reclicking mid-fade snapped the wavelength from the ring's low
+    // frequency (a few big rings) up to the feed frequency (many small rings) -- the "sudden
+    // appearance of full rings" flicker. while the ring lasts, feed + ring share its low frequency
+    // (coherent, no beating); as relRip decays past the threshold the frequency eases to the feed's.
+    const ringing = relRip > 0.02; // a post-collapse release ring is still the active driver
     const ringMass = ringing ? relM0 : 1.0;
     const freqMass = Math.max(feeding ? mass : 1.0, ringMass);
     // combine the preset's baseline ringdown (its real mass) with the interactive fed-mass
@@ -809,32 +760,86 @@ void main() {
   // pull target follows the pointer (mouse hover, or a held/dragged touch); the
   // momentum + coast live in render(). nav tracking uses the same pull.
   function onPointerMove(e) {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (multiTouch) {                         // pinch in progress: spread/squeeze the fingers to zoom, no pull
+      if (pointers.size >= 2) {
+        const pts = Array.from(pointers.values());
+        const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        camZoom = Math.max(ZOOM_MIN, pinchZoom0 * d / pinchDist); // no upper cap -> infinite zoom-in; persisted on release
+        if (reduceMotion) start();
+      }
+      return;
+    }
     tgtPullX = (e.clientX / window.innerWidth - 0.5) * CURSOR_PULL;
     tgtPullY = (e.clientY / window.innerHeight - 0.5) * CURSOR_PULL;
     pointerActive = true;
     pullTouch = (e.pointerType !== 'mouse'); // touch drifts faster than the slow mouse hover
   }
+
+  // a second finger landed: switch from feed/pull to a pinch that drives the camera zoom.
+  // the first finger's feed was DEFERRED (touchFeedTimer), so cancelling it here normally
+  // leaves the hole untouched (mass still 1) -> a pinch never feeds or flares. if the first
+  // finger had already been held long enough to start feeding, ease that mass back smoothly
+  // (collapse) instead of hard-snapping it. also undo any pull the first finger drifted in.
+  function beginPinch() {
+    multiTouch = true;
+    clearTimeout(touchFeedTimer);
+    pressed = false; pointerActive = false; pullTouch = false; swTouch = false;
+    velX = 0; velY = 0; pullX = swPullX; pullY = swPullY;
+    if (mass > 1.001) { relM0 = mass; relT = 0; collapsing = true; } // was already feeding: ease back, no snap
+    else { mass = 1.0; massTarget = 1.0; collapsing = false; }       // the common case: nothing was fed
+    wasFeeding = false; relRip = 0;
+    const pts = Array.from(pointers.values());
+    pinchDist = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1e-3);
+    pinchZoom0 = camZoom;
+  }
   // press = feed: a tap of mass; holding pours more in (render()). the disk speed
   // follows mass, so feeding also energizes the streaks. nav stays in sync via mass.
   // a press on a control (the preset picker, a link, a button) shouldn't feed.
-  // a touch press also starts swipe tracking (a horizontal swipe cycles presets).
+  // mouse feeds immediately; a touch DEFERS its feed (startTouchFeed) so a second finger
+  // can turn the gesture into a pinch before any feed happens. a touch also starts swipe
+  // tracking (a horizontal/vertical swipe cycles presets).
   function onPointerDown(e) {
     swTouch = false;
     if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input')) return;
-    if (e.pointerType !== 'mouse') { swTouch = true; swX = e.clientX; swY = e.clientY; swT = e.timeStamp; swPullX = pullX; swPullY = pullY; }
-    onPointerMove(e);
+    if (e.pointerType === 'mouse') {
+      onPointerMove(e);
+      pressed = true;
+      massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
+      // NOTE: don't clear relRip here. a still-fading release ring is left to decay on its own
+      // (relTau) so reclicking can't make it vanish/snap -- the new feed's ripple just sums with
+      // it, and the frequency stays tied to the ring while it lasts (see `ringing` in render).
+      return;
+    }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size >= 2) { clearTimeout(touchFeedTimer); beginPinch(); return; } // 2nd finger: pinch-zoom, never feeds
+    swTouch = true; swX = e.clientX; swY = e.clientY; swT = e.timeStamp; swPullX = pullX; swPullY = pullY;
+    onPointerMove(e); // pull tracks the finger right away; feeding waits (deferred below)
+    clearTimeout(touchFeedTimer);
+    touchFeedTimer = setTimeout(startTouchFeed, TOUCH_FEED_DELAY);
+  }
+  // fires TOUCH_FEED_DELAY after a single touch lands: if it's still one finger (not a
+  // pinch, not lifted), begin feeding. a very fast tap that releases before this simply
+  // doesn't feed (the deferral is what keeps a pinch from ever feeding).
+  function startTouchFeed() {
+    if (multiTouch || pointers.size !== 1) return; // a 2nd finger or a lift beat the timer
     pressed = true;
     massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
-    // each new feed clears the lingering release ring so rapid holds don't pile it up
-    // ("strange wobble"). ripShown eases it down, no pop. (inflow no longer hard-reset
-    // here -- that jumped the streak radius; its fast decay handles accumulation instead.)
-    relRip = 0;
+    // don't clear relRip (see the note in onPointerDown): a lingering release ring decays on its own
   }
   // release: stop the spin-up. touch/pen also ends the pull so it coasts to a
   // stop; mouse keeps following its cursor (the desktop pull ends on mouseleave).
   // a quick, axis-dominant touch swipe (horizontal OR vertical) cycles presets:
   // left/up = next, right/down = previous. the throw follows the swipe vector.
   function onPointerUp(e) {
+    if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
+    if (multiTouch) {                          // lifting a finger out of a pinch
+      if (pointers.size < 2) { try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (err) { /* private mode / file:// */ } }
+      if (pointers.size === 0) multiTouch = false; // all fingers up: single-finger feed/pull/swipe re-enabled
+      pressed = false; pointerActive = false;
+      return;                                  // a pinch release never feeds or cycles presets
+    }
+    clearTimeout(touchFeedTimer);
     pressed = false;
     if (e.pointerType !== 'mouse') pointerActive = false;
     if (swTouch) {
@@ -860,89 +865,43 @@ void main() {
   }
   function onMouseLeave() { pointerActive = false; pressed = false; }
 
-  // FALLBACK direction from orientation Euler angles (gamma=L/R, beta=fwd/back). only used
-  // when devicemotion gives no gravity vector -- beta/gamma gimbal-lock + cross-couple, which
-  // is what made the marble "wander off direction"; onMotion's gravity vector is preferred.
-  function onOrient(e) {
-    if (motionActive) return;                      // devicemotion owns the (truer) direction
-    if (e.beta == null || e.gamma == null) return; // no real sensor (desktop): leave the sin-drift on
-    gyroActive = true;                             // -> render() fades the autonomous drift out
-    if (gyroBeta0 == null) { gyroBeta0 = e.beta; gyroGamma0 = e.gamma; } // capture the neutral hold
-    gyroBeta0 += (e.beta - gyroBeta0) * GYRO_RECENTER;     // slowly forget a sustained tilt
-    gyroGamma0 += (e.gamma - gyroGamma0) * GYRO_RECENTER;
-    const dB = e.beta - gyroBeta0, dG = e.gamma - gyroGamma0;
-    gyroTX = clamp1(GYRO_SIGN_X * deadzone(dG / GYRO_RANGE)) * GYRO_MAX; // tilt right -> hole rolls right (downhill)
-    gyroTY = clamp1(GYRO_SIGN_Y * deadzone(dB / GYRO_RANGE)) * GYRO_MAX; // tilt forward/back -> rolls down/up
-  }
-
-  // device MOTION (mobile, preferred). the GRAVITY vector projected onto the screen (x,y) is
-  // the TRUE downhill direction with no gimbal lock -> the marble rolls where it should. and
-  // the gravity-removed linear acceleration spikes on a SHAKE -> feeds the hole like a hold.
+  // device MOTION (mobile): the gravity-removed linear acceleration spikes on a SHAKE,
+  // which feeds the hole like a hold (the tilt-roll "marble" was dropped as untunable;
+  // shake is binary -- a hard shake pours mass in, stopping collapses like a release).
   function onMotion(e) {
-    const g = e.accelerationIncludingGravity;
-    if (g && g.x != null && g.y != null) {
-      motionActive = true; gyroActive = true;             // onOrient steps aside, drift fades out
-      // low-pass the gravity vector into a steady estimate -> the tilt reads off the smoothed
-      // gravity, not the jittery raw sample, so a still hand holds still (kills the instability).
-      if (!gravLpInit) { gravLpX = g.x; gravLpY = g.y; gravLpInit = true; }
-      else { gravLpX = GRAV_LP * gravLpX + (1 - GRAV_LP) * g.x; gravLpY = GRAV_LP * gravLpY + (1 - GRAV_LP) * g.y; }
-      if (gravX0 == null) { gravX0 = gravLpX; gravY0 = gravLpY; } // capture the neutral hold pose
-      // the gyro wakes from the activation tap/swipe -- the phone is moving at that instant, so
-      // the first reading is a bad "neutral". settle the baseline fast for ~0.5s (it averages the
-      // real resting pose, keeping left/right reach symmetric), THEN lock to the tiny recenter.
-      const rc = gyroWarm < 30 ? 0.08 : GYRO_RECENTER;
-      gyroWarm++;
-      gravX0 += (gravLpX - gravX0) * rc;                  // settle, then slowly forget a sustained tilt
-      gravY0 += (gravLpY - gravY0) * rc;
-      gyroTX = clamp1(GYRO_SIGN_X * deadzone((gravLpX - gravX0) / GYRO_G_RANGE)) * GYRO_MAX;
-      gyroTY = clamp1(GYRO_SIGN_Y * deadzone((gravLpY - gravY0) / GYRO_G_RANGE_Y)) * GYRO_MAX;
-    }
-    const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake/flick
+    const a = e.acceleration; // gravity removed: ~0 at rest, spikes on a shake/flick
     if (a && a.x != null) {
       const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
       if (mag > shakeLevel) shakeLevel = mag;             // peak-hold; render() coasts it down (SHAKE_TAU)
-      if (a.x != null && Math.abs(a.x) > Math.abs(accPkX)) accPkX = a.x; // peak-hold the flick for the shove
-      if (a.y != null && Math.abs(a.y) > Math.abs(accPkY)) accPkY = a.y; // (render consumes + zeroes these)
     }
   }
-  function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
-  // deadzone: |v| below GYRO_DEAD returns 0 (slight/incidental tilts don't move the hole);
-  // past it, re-normalized so a full tilt (|v|=1) still maps to 1 -- the edges stay reachable.
-  function deadzone(v) {
-    const a = Math.abs(v);
-    if (a <= GYRO_DEAD) return 0;
-    return (v < 0 ? -1 : 1) * (a - GYRO_DEAD) / (1 - GYRO_DEAD);
-  }
 
-  // wire up the gyro. iOS 13+ gates DeviceOrientation behind a permission prompt that
-  // must be requested from inside a user gesture, so init arms GYRO_GESTURES (completed
+  // wire up devicemotion (shake feed). iOS 13+ gates it behind a permission prompt that
+  // must be requested from inside a user gesture, so init arms MOTION_GESTURES (completed
   // taps) and the first one calls this; it retries until iOS answers, then disarms them.
   // Android / older iOS have no prompt and are attached directly at init instead.
-  function enableGyro() {
-    if (gyroRequested || gyroPending || reduceMotion || !isCoarse) return;
-    const DOE = window.DeviceOrientationEvent;
-    if (!DOE) return;
-    if (typeof DOE.requestPermission !== 'function') { // Android / older iOS: no prompt
-      gyroRequested = true;
+  function enableMotion() {
+    if (motionRequested || motionPending || reduceMotion || !isCoarse) return;
+    const DME = window.DeviceMotionEvent;
+    if (!DME) return;
+    if (typeof DME.requestPermission !== 'function') { // Android / older iOS: no prompt
+      motionRequested = true;
       attachMotion();
       return;
     }
     // iOS 13+: the prompt needs transient user activation. mark the request in flight (NOT
     // done) so that if this gesture lacked activation and the promise rejects, the next
-    // completed tap can retry instead of being locked out by an early gyroRequested=true.
-    gyroPending = true;
-    DOE.requestPermission().then(function (s) {
-      gyroRequested = true; gyroPending = false;            // iOS answered: stop retrying
-      GYRO_GESTURES.forEach(function (ev) { window.removeEventListener(ev, enableGyro); });
+    // completed tap can retry instead of being locked out by an early motionRequested=true.
+    motionPending = true;
+    DME.requestPermission().then(function (s) {
+      motionRequested = true; motionPending = false;        // iOS answered: stop retrying
+      MOTION_GESTURES.forEach(function (ev) { window.removeEventListener(ev, enableMotion); });
       if (s === 'granted') attachMotion();
-    }).catch(function () { gyroPending = false; /* no activation: next gesture retries */ });
+    }).catch(function () { motionPending = false; /* no activation: next gesture retries */ });
   }
 
-  // attach both sensor streams: devicemotion (gravity direction + shake feed, preferred) and
-  // deviceorientation (Euler fallback). on iOS the single granted Motion permission covers both.
   function attachMotion() {
     window.addEventListener('devicemotion', onMotion);
-    window.addEventListener('deviceorientation', onOrient);
   }
 
   // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
@@ -994,11 +953,12 @@ void main() {
     if (reduceMotion) start();
   }
 
-  // bottom-right [-] [reset] [+] to CAMERA-zoom the whole scene in/out (desktop + mobile).
-  // buttons are <button>, which the press-guard already excludes, so tapping them never feeds
-  // the hole.
+  // bottom-right [-] [reset] [+] to CAMERA-zoom the whole scene in/out (DESKTOP only;
+  // mobile pinch-zooms instead). buttons are <button>, which the press-guard already
+  // excludes, so tapping them never feeds the hole.
   function addZoomControls() {
     try { const z = parseFloat(localStorage.getItem('bh-zoom')); if (isFinite(z) && z > 0) camZoom = Math.max(ZOOM_MIN, z); } catch (e) { /* ignore */ }
+    if (isCoarse) return;        // touch screens use the pinch gesture; no on-screen buttons
     const wrap = document.createElement('div');
     wrap.className = 'bh-zoom';
     const mk = function (sym, label, onClick) {
