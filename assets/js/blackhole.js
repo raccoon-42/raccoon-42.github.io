@@ -32,10 +32,11 @@
   const MASS_LUM_K = 0.7; // feeding brightens + heats the disk (bluer, via the shader's TEMP_BLUE): flare = e^(K*(mass-1)) (lower = reaches white more gradually)
   const VIEW_FIT = 0.8;  // responsive base size: zoom the hole out on narrow/portrait screens so the event horizon has margin (mobile); wide screens clamp to 1.0 (unaffected)
   const VIEW_MIN = 0.33; // floor for that base size (never smaller than this fraction)
+  const VIEW_MAX = 0.6;  // ceiling: wide/desktop screens cap here (was 1.0) so the hole isn't too zoomed -- leaves room to see beyond the event horizon
   const INFLOW_SPEED = 0.6;  // how fast the disk's matter spirals inward while you hold (drives INFALL_K in the shader; 0 = off)
   const INFLOW_RELAX = 0.97; // when released, how fast that inward pull eases back out (per frame)
   const WOBBLE_AMP = 0.085; // changing the hole "drops it onto the screen": base drop (uv), scaled by the hole's mass
-  const WOBBLE_OMEGA = 4.5;   // base natural frequency (rad/s); divided by sqrt(mass) so heavy holes wobble slower (inertia)
+  const WOBBLE_OMEGA = 9.5;   // base natural frequency (rad/s); divided by sqrt(mass) so heavy holes wobble slower (inertia)
   const WOBBLE_ZETA = 0.16;  // damping ratio: low = keeps shaking (several decaying oscillations) after a swipe; ~cycles before settling = 0.37/this
   const WOBBLE_SIZE = 0.18;  // on impact the hole swells this much, deepening the gravity well (spacetime bend felt), relaxing with the wobble
   const RIPPLE_FEED_K = 1.3; // feeding shakes the spacetime fabric: vibration = 1 - e^(-(mass-1)*this), saturating as you feed (0 = only the wobble ripples)
@@ -359,6 +360,7 @@ void main() {
     // a long press is a feed gesture here, not a context menu / text selection;
     // suppress the menu the browser would otherwise pop (Android especially)
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
     addPresetPicker(initial);
     start();
   }
@@ -374,7 +376,7 @@ void main() {
     gl.viewport(0, 0, w, h);
     if (uRes) gl.uniform3f(uRes, w, h, 1.0);
     // shrink the hole on narrow/portrait screens so the whole disk fits the width
-    baseScale = Math.max(VIEW_MIN, Math.min(1.0, (window.innerWidth / window.innerHeight) * VIEW_FIT));
+    baseScale = Math.max(VIEW_MIN, Math.min(VIEW_MAX, (window.innerWidth / window.innerHeight) * VIEW_FIT));
     buildTextTexture(q);
   }
 
@@ -575,6 +577,22 @@ void main() {
     }
   }
   function onMouseLeave() { pointerActive = false; pressed = false; }
+
+  // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
+  // throwing the landing wobble in the arrow's direction. when the picker <select>
+  // is focused, let it handle arrows natively (its change still cycles + wobbles).
+  function onKeyDown(e) {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    let dir = 0, dx = 0, dy = 0;
+    if (e.key === 'ArrowRight') { dir = 1; dx = 1; }
+    else if (e.key === 'ArrowLeft') { dir = -1; dx = -1; }
+    else if (e.key === 'ArrowDown') { dir = 1; dy = 1; }
+    else if (e.key === 'ArrowUp') { dir = -1; dy = -1; }
+    else return;
+    e.preventDefault();
+    cyclePreset(dir, dx, dy, 1.2);
+  }
 
   // on-scene control to switch the black-hole look; each pick relinks the shader
   function addPresetPicker(current) {
