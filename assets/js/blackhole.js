@@ -30,7 +30,7 @@
   const MASS_MAX = 4.0;  // hard cap on the size multiplier (how big it can ever get)
   const MASS_COLLAPSE_DUR = 0.34; // release collapse: how long (s) the swift snap back to baseline takes (lower = faster "phiiuuuv")
   const MASS_COLLAPSE_EXP = 3.6;  // shape of that snap: an accelerating e^x curve (0 = linear; higher = more back-loaded -- hangs, then rushes home)
-  const MASS_EASE = 0.08; // while held, how smoothly the visible size follows the accumulated mass (the gentle pour-in feel; release uses the collapse animation)
+  const MASS_EASE = 0.045; // while held, how smoothly the visible size follows the accumulated mass (the gentle pour-in feel; release uses the collapse animation). lowered from 0.08 so the initial tap's FEED_TAP bump swells IN gradually instead of the disk popping large on the first click/touch
   const MASS_SIZE_K = 0.5; // the event horizon largens exponentially with mass: size = e^(K*(mass-1)) (higher = the zoom accelerates sooner/harder)
   const MASS_LUM_K = 0.7; // feeding brightens + heats the disk (bluer, via the shader's TEMP_BLUE): flare = e^(K*(mass-1)) (lower = reaches white more gradually)
   const VIEW_FIT = 0.8;  // responsive base size: zoom the hole out on narrow/portrait screens so the event horizon has margin (mobile); wide screens clamp to 1.0 (unaffected)
@@ -68,7 +68,8 @@
   // ON TOP of the finger pull and, while live, replaces the autonomous sin-drift.
   const GYRO_MAX = 0.42;      // max uv offset a tilt can push the hole. 0.42 lets it roll right out to the screen edges (center 0.5 +/- this); lower = stays more central
   const GYRO_RANGE = 32.0;    // degrees of tilt from baseline that map to the full GYRO_MAX
-  const GYRO_EASE = 0.018;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 since the wider GYRO_MAX made the same ease cover much more distance per frame -> too fast
+  const GYRO_EASE = 0.011;    // how heavily the hole rolls toward the tilt target (low = laggier, heavier, slower marble). dropped from 0.05 -> 0.018 -> 0.011 as the wider GYRO_MAX made the same ease cover much more distance per frame -> felt too fast
+  const GYRO_DEAD = 0.16;     // deadzone: fraction of the tilt range near neutral that produces NO movement, so small/incidental tilts don't drift the hole. re-normalized past the deadzone, so a full tilt still reaches the edge (just needs a deliberate tilt to start). 0 = react to the slightest motion
   const GYRO_RECENTER = 0.0006;// per-reading drift of the neutral baseline toward the held angle. KEPT TINY so a held tilt PERSISTS (hole stays pushed to the edge, doesn't fade back); just enough that a permanent pose change eventually re-neutralizes over ~30s. 0 = never recenter
   const GYRO_SIGN_X = 1.0;    // flip to -1 if left/right tilt rolls the hole the wrong way on device
   const GYRO_SIGN_Y = 1.0;    // flip to -1 if forward/back tilt rolls the hole the wrong way on device
@@ -148,6 +149,7 @@ void main() {
   let gyroX = 0, gyroY = 0, gyroTX = 0, gyroTY = 0;    // gyro drift: hole offset + tilt-driven target (eased, marble-in-bowl)
   let gyroBeta0 = null, gyroGamma0 = null;             // orientation-fallback neutral tilt baseline (only used if devicemotion gives no gravity)
   let gravX0 = null, gravY0 = null, motionActive = false; // gravity-vector neutral baseline + whether devicemotion is driving the direction
+  let gyroWarm = 0;                                    // readings since gyro woke: the baseline settles fast for the first few so the activation-tap pose isn't frozen in as a lopsided "neutral"
   let shakeLevel = 0, shaking = false;                 // smoothed shake intensity (linear accel) + whether it's feeding the hole like a hold
   let gyroActive = false, gyroRequested = false, gyroPending = false; // gyro receiving data / iOS permission answered (one-shot) / request in flight
   const GYRO_GESTURES = ['pointerup', 'touchend', 'click']; // iOS: completed-gesture events that reliably carry the activation requestPermission() needs
@@ -409,7 +411,7 @@ void main() {
     let ux, uy;
     if (len > 1e-4) { ux = dirX / len; uy = dirY / len; } // throw along the swipe direction
     else { ux = (Math.random() - 0.5) * 0.5; uy = -1.0; } // no swipe: fall in from above
-    const amp = Math.min(WOBBLE_AMP * presetScale * (0.75 + Math.random() * 0.6) * (strength || 1), 0.22); // cap so it stays in frame
+    const amp = Math.min(WOBBLE_AMP * presetScale * (0.75 + Math.random() * 0.6) * (strength || 1), 0.26); // cap so it stays in frame (raised so a hard swipe reads bigger)
     ux += (Math.random() - 0.5) * 0.25;                   // a little jitter so it's never identical
     uy += (Math.random() - 0.5) * 0.25;
     wobDX = amp * ux;
@@ -797,7 +799,10 @@ void main() {
         // coast) the swipe dragged in, so the hole doesn't also fly to the swipe end
         // and stack past the edge with the wobble. only the capped wobble moves it.
         pullX = swPullX; pullY = swPullY; velX = 0; velY = 0;
-        const strength = 0.7 + Math.min(amaj / span, 0.6) * 1.5; // longer swipe = harder throw
+        // power curve (not linear): a flick barely nudges, a long hard swipe throws
+        // it MUCH harder, so the swipe's force is felt -- not a near-flat response.
+        const swn = Math.min(amaj / span, 0.6) / 0.6;          // 0..1: swipe length, capped
+        const strength = 0.6 + Math.pow(swn, 1.8) * 2.6;       // ~0.6 (gentle) .. 3.2 (full swipe)
         cyclePreset(major < 0 ? 1 : -1, dx, dy, strength); // left/up = next, right/down = previous
       }
       swTouch = false;
@@ -816,8 +821,8 @@ void main() {
     gyroBeta0 += (e.beta - gyroBeta0) * GYRO_RECENTER;     // slowly forget a sustained tilt
     gyroGamma0 += (e.gamma - gyroGamma0) * GYRO_RECENTER;
     const dB = e.beta - gyroBeta0, dG = e.gamma - gyroGamma0;
-    gyroTX = clamp1(GYRO_SIGN_X * dG / GYRO_RANGE) * GYRO_MAX; // tilt right -> hole rolls right (downhill)
-    gyroTY = clamp1(GYRO_SIGN_Y * dB / GYRO_RANGE) * GYRO_MAX; // tilt forward/back -> rolls down/up
+    gyroTX = clamp1(GYRO_SIGN_X * deadzone(dG / GYRO_RANGE)) * GYRO_MAX; // tilt right -> hole rolls right (downhill)
+    gyroTY = clamp1(GYRO_SIGN_Y * deadzone(dB / GYRO_RANGE)) * GYRO_MAX; // tilt forward/back -> rolls down/up
   }
 
   // device MOTION (mobile, preferred). the GRAVITY vector projected onto the screen (x,y) is
@@ -828,10 +833,15 @@ void main() {
     if (g && g.x != null && g.y != null) {
       motionActive = true; gyroActive = true;             // onOrient steps aside, drift fades out
       if (gravX0 == null) { gravX0 = g.x; gravY0 = g.y; } // capture the neutral hold pose
-      gravX0 += (g.x - gravX0) * GYRO_RECENTER;           // slowly forget a sustained tilt
-      gravY0 += (g.y - gravY0) * GYRO_RECENTER;
-      gyroTX = clamp1(GYRO_SIGN_X * (g.x - gravX0) / GYRO_G_RANGE) * GYRO_MAX;
-      gyroTY = clamp1(GYRO_SIGN_Y * (g.y - gravY0) / GYRO_G_RANGE_Y) * GYRO_MAX;
+      // the gyro wakes from the activation tap/swipe -- the phone is moving at that instant, so
+      // the first reading is a bad "neutral". settle the baseline fast for ~0.5s (it averages the
+      // real resting pose, keeping left/right reach symmetric), THEN lock to the tiny recenter.
+      const rc = gyroWarm < 30 ? 0.08 : GYRO_RECENTER;
+      gyroWarm++;
+      gravX0 += (g.x - gravX0) * rc;                      // settle, then slowly forget a sustained tilt
+      gravY0 += (g.y - gravY0) * rc;
+      gyroTX = clamp1(GYRO_SIGN_X * deadzone((g.x - gravX0) / GYRO_G_RANGE)) * GYRO_MAX;
+      gyroTY = clamp1(GYRO_SIGN_Y * deadzone((g.y - gravY0) / GYRO_G_RANGE_Y)) * GYRO_MAX;
     }
     const a = e.acceleration; // gravity removed: ~0 at rest + on slow tilts, spikes on a shake
     if (a && a.x != null) {
@@ -840,6 +850,13 @@ void main() {
     }
   }
   function clamp1(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
+  // deadzone: |v| below GYRO_DEAD returns 0 (slight/incidental tilts don't move the hole);
+  // past it, re-normalized so a full tilt (|v|=1) still maps to 1 -- the edges stay reachable.
+  function deadzone(v) {
+    const a = Math.abs(v);
+    if (a <= GYRO_DEAD) return 0;
+    return (v < 0 ? -1 : 1) * (a - GYRO_DEAD) / (1 - GYRO_DEAD);
+  }
 
   // wire up the gyro. iOS 13+ gates DeviceOrientation behind a permission prompt that
   // must be requested from inside a user gesture, so init arms GYRO_GESTURES (completed
