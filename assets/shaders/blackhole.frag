@@ -23,6 +23,8 @@ uniform float     iDiskTime;    // disk-streak clock: like iTime but sped up on 
 uniform float     iMass;        // hole size multiplier; grows as you "feed" it (set in blackhole.js; 1 = baseline)
 uniform float     iFlare;       // disk luminosity multiplier; rises as you feed (1 = baseline). set in blackhole.js
 uniform float     iInflow;      // feeding: drives the inward pull (disk matter spirals inward toward the shadow). set in blackhole.js
+uniform float     iRipple;      // 0 normally; >0 while the hole wobbles -> a radial wave shakes the lensed text (spacetime fabric). set in blackhole.js
+uniform float     iDiskWob;     // transient tilt added to the disk inclination so it nods/sloshes when the hole shakes or moves (0 at rest). set in blackhole.js
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -47,6 +49,18 @@ const float DISK_CYCLE     = 8.0;    // seconds per renewal cycle (lower = crisp
 const float INFALL_K       = 2.5;    // feeding: how fast the disk's matter spirals inward toward the shadow (0 = orbit only)
 const float TEMP_BLUE      = 0.12;   // feeding: how much hotter/bluer the disk runs as accretion rises (real: higher rate -> higher temp)
 const float DOPP_COLOR     = 2.0;    // exaggerate the Doppler/grav shift on color so red (receding) / blue (approaching) shows at this temp
+// gravitational ripple: while the hole wobbles (iRipple > 0) a radial wave runs
+// through the lensed text, like the spacetime fabric shaking from the impact.
+const float RIPPLE_AMP     = 0.06;   // ripple displacement of the sampled fabric (screen-height units) -- this is the main "how violent" knob
+const float RIPPLE_FREQ    = 30.0;   // ripple spatial frequency (fewer, bigger wave rings = more visible slosh)
+const float RIPPLE_SPEED   = 7.0;    // how fast the rings propagate outward
+const float RIPPLE_FALL    = 0.5;    // how fast the ripple fades with distance from the hole (lower = reaches further out, more even across presets)
+// the accretion disk ripples too (same iRipple envelope): a radial wave runs
+// through the disk, shifting its streaks in/out and pulsing brightness in rings.
+const float DISK_RIP_FREQ  = 0.9;    // disk ripple rings per r_s of radius (fewer = bigger, more visible rings)
+const float DISK_RIP_SPEED = 2.0;    // how fast the disk rings travel outward (kept well below RIPPLE_SPEED so the ring ripples slower than the fabric)
+const float DISK_RIP_SHIFT = 0.7;    // radial wobble of the bright ring in/out (r_s) -- the main visible knob
+const float DISK_RIP_BRIGHT= 0.4;    // brightness pulse of the disk rings
 #define N_STEPS 36                    // geodesic integration steps per near-field pixel
 #define B_CRIT 2.5980762              // critical impact parameter (shadow radius), in r_s
 
@@ -139,6 +153,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     DiskLook L = PRESET;
     L.star = STAR_OVERRIDE;
     L.temp *= 1.0 + (iFlare - 1.0) * TEMP_BLUE;   // accretion heats the disk -> bluer when fed
+    L.incl += iDiskWob;                           // the disk nods/sloshes when the hole shakes or moves (0 at rest)
 
     float rin  = max(L.inner, 1.6);
     float rout = max(L.outer, rin + 0.5);
@@ -165,6 +180,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // fade lensing a few disk diameters out so a drifting hole doesn't shimmer
     float window = exp(-pow(plen / (7.0 * rh), 2.0));
 
+    // gravitational ripple: a radial wave through the lensed text while the hole
+    // wobbles. added identically to the far + near background sample (no seam).
+    // banded between the shadow and a few diameters out; propagates outward.
+    // band it from just outside the shadow (so it tracks the hole as it grows) on
+    // out across the field, propagating outward
+    float rip = iRipple * RIPPLE_AMP
+              * sin(plen * RIPPLE_FREQ - iTime * RIPPLE_SPEED)
+              * smoothstep(rh, 1.5 * rh, plen) * exp(-plen * RIPPLE_FALL);
+    vec2  ripOff = (p / max(plen, 1e-5)) * rip;
+
     float bmax = rout + 3.0;                // rays beyond this can't touch the disk
     float Z0   = max(14.0, rout + 5.0);     // camera distance
 
@@ -184,6 +209,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             float k   = 1.0 + (float(i) - 1.0) * ab;
             vec2  sp  = p - dir * defl * k;
             sp.x += WARP_LEAN * p.y * window * shield;  // lean (matches the near field)
+            sp += ripOff;                               // shake the fabric (matches the near field)
             vec2  suv = mirrorUV(center + sp / vec2(aspect, 1.0));
             term[i]   = texture(iChannel0, suv)[i];
         }
@@ -234,8 +260,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec3  xc = mix(xPrev, x, tc);
             float rc = length(xc);
             if (rc > rin && rc < rout) {
-                float band = smoothstep(rin, rin * 1.25, rc)
-                           * (1.0 - smoothstep(rout * 0.70, rout, rc));
+                // disk ripple: a radial wave (same iRipple envelope as the fabric, but
+                // slower) wobbles the bright ring's radius in/out + pulses its brightness
+                float diskRip = iRipple * sin(rc * DISK_RIP_FREQ - iTime * DISK_RIP_SPEED);
+                float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
+                float band = smoothstep(rin, rin * 1.25, rcW)
+                           * (1.0 - smoothstep(rout * 0.70, rout, rcW));
 
                 float phi   = atan(dot(xc, e2), xc.x);
                 float turns = phi / 6.2831853;
@@ -252,7 +282,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
                 // feeding drifts the streak pattern inward in radius -> matter spirals
                 // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
-                float rcN   = rc + iInflow * INFALL_K;
+                // (streaks follow the wobbled radius too, so the texture ripples with the ring)
+                float rcN   = rcW + iInflow * INFALL_K;
                 float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
                               vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
                 float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
@@ -271,7 +302,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
                 float boost = pow(g, L.beam);
 
-                float density = band * streaks;
+                float density = band * streaks * max(0.0, 1.0 + diskRip * DISK_RIP_BRIGHT);
                 emitc += trans * cbb * (L.gain * 2.2 * density * tprof * tprof * boost);
                 trans *= 1.0 - clamp(L.opac * density, 0.0, 1.0);
             }
@@ -297,6 +328,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             // lean the warp so it isn't mirror-symmetric; same shear + window as
             // the far field, so the two stay continuous across the handoff ring
             samp.x += WARP_LEAN * p.y * window * shield;
+            samp += ripOff;                              // shake the fabric (matches the far field)
             vec2  suv = mirrorUV(center + samp / vec2(aspect, 1.0));
             // rays bent past ~90deg never reach the plane; fade to the starfield
             float toward = smoothstep(0.05, 0.35, -d.z);

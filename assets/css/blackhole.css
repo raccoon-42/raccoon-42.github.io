@@ -6,6 +6,7 @@ body.bh-scene {
     background: transparent;          /* let the canvas (z-index:-1) show through */
     color: #e6edf3;
     overflow: hidden;                 /* full-viewport scene, no scroll */
+    overscroll-behavior: none;        /* keep vertical swipes ours (no pull-to-refresh/overscroll) */
 }
 
 #blackhole-canvas {
@@ -53,6 +54,40 @@ body.bh-scene .nav-social svg { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.85
 
 /* no logo on the 404 scene (a black-hole logo over the black hole is redundant) */
 body.bh-scene .nav-logo { display: none; }
+
+/* void only: a back-to-home button pinned to the top-left corner (mirrors the
+   GitHub icon top-right). replaces the old centered "back" text under the hole. */
+body.bh-scene .bh-back {
+    position: fixed;
+    top: 0.85em;
+    left: 1.1em;
+    z-index: 4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.3em;
+    height: 2.3em;
+    border-radius: 999px;
+    color: #d7dde6;
+    background: rgba(18, 22, 31, 0.55);
+    border: 1px solid rgba(150, 165, 195, 0.25);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+body.bh-scene .bh-back:hover,
+body.bh-scene .bh-back:focus-visible {
+    color: #fff;
+    border-color: rgba(150, 165, 195, 0.5);
+    background: rgba(30, 36, 48, 0.7);
+    outline: none;
+}
+body.bh-scene .bh-back svg { display: block; }
+/* void is a minimal portal: the back arrow (left) + GitHub (right) are the only
+   chrome, so drop the nav links/hamburger (the arrow + nav looked cluttered).
+   the GitHub icon lives in nav too, so hide the menu/toggle, not the whole nav. */
+body.bh-void .nav-menu,
+body.bh-void .nav-toggle { display: none; }
 
 /* the theme toggle is a no-op here (this page is a forced dark scene) */
 body.bh-scene #theme-toggle { display: none; }

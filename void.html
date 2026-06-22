@@ -28,16 +28,20 @@
     <!-- Privacy-friendly analytics (GoatCounter) -->
     <script data-goatcounter="https://aliozkaya.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </head>
-<body class="page index bh-scene">
+<body class="page index bh-scene bh-void">
     <canvas id="blackhole-canvas" aria-hidden="true"></canvas>
     {% include nav.html %}
+
+    <a class="bh-back" href="/index.html" aria-label="back to home" title="back">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </a>
 
     <header>
         <div class="header-inner">
             <div class="content">
                 <h1 class="visually-hidden">the void</h1>
-                <p class="bh-sub">a Schwarzschild black hole, traced one ray per pixel</p>
-                <a class="home-link" href="/index.html">&larr; back</a>
             </div>
         </div>
     </header>
