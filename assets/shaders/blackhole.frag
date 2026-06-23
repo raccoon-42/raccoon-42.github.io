@@ -38,7 +38,6 @@ out vec4 outColor;
 const float HOLE_RADIUS   = 0.06;    // shadow radius as a fraction of screen height
 const float LENS_DEPTH    = 1000.0;    // how hard the background text bends
 const float TEX_MARGIN    = 0.30;    // HORIZONTAL padding only: the text plane is rendered this much wider than the viewport each side, so rays bent off-screen left/right sample real text instead of the mirror seam. (VERTICALLY the texture is an exact line-period multiple and tiles seamlessly via WRAP_T=REPEAT -- see texSample + buildTextTexture.) matched in blackhole.js.
-const float NEAR_FIELD_LOD_CAP = 4.0; // mip-LOD CEILING for the near-the-hole background sample. it lives in the geodesic loop = divergent flow, where the auto-LOD derivative is UNDEFINED: Apple/mobile return sane values (nice adaptive smoothing, which we keep), but NVIDIA desktop returns garbage-huge -> it grabbed the gray top mip = whitish blob over the hole. we compute the adaptive LOD ourselves and clamp it to this cap so the garbage can't reach the near-uniform top levels; sane values sit under the cap, unchanged. lower = blob dies harder but Apple's deep-compression smoothing is trimmed; higher = more faithful to auto-LOD but risks the blob creeping back. far field keeps auto-LOD (uniform flow -> defined; that's the zoom-out anti-shimmer).
 const float INTENSITY     = 0.06;    // 0 = fast disk, 1 = slow/dilated, massive feel
 const float DRIFT_AMT     = 0.045;   // hole wander: makes the bent text ripple
 const float DILATION_MIN  = 0.20;    // disk pattern rate at full INTENSITY
@@ -374,14 +373,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec2  suv = texSample(center + samp / vec2(aspect, 1.0));
             // rays bent past ~90deg never reach the plane; fade to the starfield
             float toward = smoothstep(0.05, 0.35, -d.z);
-            // adaptive LOD, but CLAMPED (see NEAR_FIELD_LOD_CAP). compute the footprint from the
-            // local derivative (this reproduces the auto-LOD smoothing the Mac liked), then cap it
-            // so NVIDIA's garbage/huge derivative in this divergent loop can't pick the gray top
-            // mip -> no whitish blob. NaN/inf/absurd footprints fall straight to the cap.
-            vec2  dsx = dFdx(suv), dsy = dFdy(suv);
-            float rho = max(length(dsx), length(dsy)) * float(textureSize(iChannel0, 0).y);
-            float lod = (rho < 1e18) ? log2(max(rho, 1.0)) : NEAR_FIELD_LOD_CAP;
-            bg += textureLod(iChannel0, suv, clamp(lod, 0.0, NEAR_FIELD_LOD_CAP)).rgb * toward;
+            bg += texture(iChannel0, suv).rgb * toward;
         }
     }
 
