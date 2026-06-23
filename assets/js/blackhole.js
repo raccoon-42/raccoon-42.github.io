@@ -51,6 +51,8 @@
   const WOBBLE_SIZE = 0.18;  // on impact the hole swells this much, deepening the gravity well (spacetime bend felt), relaxing with the wobble
   const RIPPLE_FEED_K = 1.3; // feeding shakes the spacetime fabric: vibration = 1 - e^(-(mass-1)*this), saturating as you feed (0 = only the wobble ripples)
   const RIPPLE_VEL_K = 0.15; // the size *changing* shakes it too; the fast snap-back on release is the biggest change, so it ripples hardest
+  const RIPPLE_DRAG_K = 0.08; // DRAGGING radiates fabric waves: source = (effective mass) * |hole ACCELERATION| * this. PHYSICS: the propagating ripples are gravitational radiation -> sourced by acceleration (a steadily-moving mass does NOT radiate), amplitude ~ MASS. 0 = off
+  const DRAG_RIP_TAU = 1.5;   // s: after the hole stops, the already-radiated waves keep travelling out + fade over this -> the ripple CONTINUES instead of snapping off. bigger = longer-lived wake (ringdown ~ 1/freq ~ M, so a heavy hole rings longer; constant here, tune if wanted)
   const REL_RIP_GAIN = 4.0;   // the release ring's strength at a FULL hold (fed mass = MASS_MAX). strength ramps linearly from ~0 at a tap to this at a full hold, so a longer hold rings proportionally HARDER (no early saturation). capped at REL_RIP_MAX.
   const REL_RIP_TAU = 1.0;    // release ringdown time-constant (s) for a light tap: the ring's amplitude decays as exp(-dt/tau) (dt-based, so frame-rate independent). higher = longer ring even for a tap.
   const REL_RIP_TAU_K = 1.5;  // a longer hold (more fed mass) rings LONGER: tau = REL_RIP_TAU * (1 + this*(fedMass-1)). physical: heavier holes ring down slower (tau ~ M). 0 = same duration regardless of hold.
@@ -124,6 +126,8 @@ void main() {
   const B_CRIT = 2.5980762;  // shadow radius in r_s; matches the shader
   let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, uCamZoom, uCamPan, tex, raf = 0, startT = 0;
   let pullX = 0, pullY = 0, tgtPullX = 0, tgtPullY = 0; // hole's drift toward the pointer (uv offset)
+  let prevPullX = 0, prevPullY = 0, prevVX = 0, prevVY = 0; // last frame's pull pos + velocity, to measure the hole's ACCELERATION for the drag-ripple
+  let dragRip = 0;                                      // drag-radiation reservoir: acceleration tops it up, it decays (DRAG_RIP_TAU) so the wake keeps rippling after the hole stops
   let velX = 0, velY = 0, pointerActive = false, pressed = false, pullTouch = false; // pull momentum + press state (touch = faster follow)
   let dragging = false;                                 // desktop: mouse button held -> grab the hole with the touch-style spring (momentum + coast); released = hover-drift again
   let diskTime = 0, lastMs = 0;                        // disk-streak warped clock (speed follows mass)
@@ -143,6 +147,7 @@ void main() {
   let camZoom = 1.0;                                    // manual +/- CAMERA zoom (FOV: scales the whole scene -- hole, disk, lensing, background -- together); via iCamZoom; persisted in localStorage
   let keyZoomDir = 0;                                   // desktop arrow zoom: +1 (up/in) / -1 (down/out) while held, integrated continuously in render(); 0 = idle
   let keyUpTimer = 0;                                   // debounce: X11/Linux auto-repeat sends keydown/keyUP pairs; a real release stops the zoom, a repeat's keyup is cancelled by the next keydown (else the zoom strobes)
+  let spaceUpTimer = 0;                                 // same debounce for the SPACEBAR feed (desktop): auto-repeat keyup must not stop the feed mid-hold
   let panX = 0, panY = 0;                               // manual CAMERA pan in uv (middle-mouse drag): slides the WHOLE scene 1:1 on screen; via iCamPan. session-only (re-centers on reload, since there's no reset button)
   let panning = false, panLastX = 0, panLastY = 0;     // middle (wheel) button held -> 1:1 view pan; last client pos to diff against
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
@@ -156,8 +161,14 @@ void main() {
   let swTouch = false, swX = 0, swY = 0, swT = 0, swPullX = 0, swPullY = 0; // touch swipe tracking (+ pull at gesture start, to undo it on a swipe)
   const pointers = new Map();                               // active touch pointers (pointerId -> {x,y}) for pinch detection
   let multiTouch = false, pinchDist = 0, pinchZoom0 = 1.0;  // pinch-to-zoom: 2 fingers drive camZoom; suppress single-finger feed/pull/swipe while >=2 down
-  let touchFeedTimer = 0;                                   // a single touch defers its feed by TOUCH_FEED_DELAY so a 2nd finger (pinch) cancels it BEFORE any feed/flare happens
+  let touchFeedTimer = 0;                                   // the armed double-tap-hold defers its feed by TOUCH_FEED_DELAY so a 2nd finger (pinch) cancels it BEFORE any feed/flare happens
   const TOUCH_FEED_DELAY = 70;                              // ms to wait; a deliberate hold still feeds (just imperceptibly later), a pinch never does
+  // FEED on mobile = double-tap-and-hold (Ali): a lone touch only pulls/swipes; feeding needs a quick
+  // tap then a held second tap near it. firstTap* = the first tap; feedArmed = this touch is the held 2nd tap.
+  let firstTapT = 0, firstTapX = 0, firstTapY = 0, feedArmed = false;
+  const DOUBLE_TAP_MS = 320;                               // max gap between the two taps
+  const DOUBLE_TAP_DIST = 44;                              // px: the 2nd tap (and a "tap" itself) must stay within this of the 1st
+  const TAP_MAX_MS = 250;                                  // a release within this (and < DOUBLE_TAP_DIST move) counts as a tap, not a hold/drag/swipe
   let wobAge = 1e9, wobDX = 0, wobDY = 0, wobX = 0, wobY = 0, wobSwell = 0, wobRip = 0; // preset-change "drop" wobble (2D throw + size swell + fabric ripple)
   let wobW = WOBBLE_OMEGA, wobZ = WOBBLE_ZETA;              // per-change natural frequency + damping ratio (set on kick)
   const tcvs = document.createElement('canvas');
@@ -501,7 +512,11 @@ void main() {
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
     window.addEventListener('keyup', onKeyUp);     // stop held arrow-key zoom + persist
-    window.addEventListener('blur', function () { clearTimeout(keyUpTimer); if (keyZoomDir) { keyZoomDir = 0; try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (e) { /* ignore */ } } }); // don't get stuck zooming if focus is lost mid-hold
+    window.addEventListener('blur', function () { // don't get stuck zooming/feeding if focus is lost mid-hold
+      clearTimeout(keyUpTimer); clearTimeout(spaceUpTimer);
+      if (keyZoomDir) { keyZoomDir = 0; try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (e) { /* ignore */ } }
+      pressed = false;
+    });
     // shake-to-feed: Android exposes devicemotion with no prompt, so attach it now.
     // iOS 13+ requires a permission request from a user gesture -> we arm the COMPLETED-
     // gesture events and let the first one trigger the prompt (a bare pointerdown/
@@ -693,8 +708,22 @@ void main() {
     const feedRip = feedActive * Math.max(0, 1.0 - Math.exp(-(mass - 1.0) * RIPPLE_FEED_K));
     const moveRip = feedActive * (dt > 0 ? Math.abs(mass - prevMass) / dt : 0) * RIPPLE_VEL_K;
     prevMass = mass;
+    // dragging the hole radiates fabric waves. PHYSICS: gravitational radiation is sourced by the
+    // hole's ACCELERATION (steady motion doesn't radiate), with amplitude ~ its MASS. the source
+    // tops up a reservoir that DECAYS (DRAG_RIP_TAU), so once the hole stops the already-radiated
+    // rings keep travelling out and fade rather than snapping off. measured off the pull position,
+    // so the slow hover-follow + tiny autonomous drift have ~no acceleration and don't ripple.
+    const vX = dt > 0 ? (pullX - prevPullX) / dt : 0;
+    const vY = dt > 0 ? (pullY - prevPullY) / dt : 0;
+    const holeAccel = dt > 0 ? Math.hypot(vX - prevVX, vY - prevVY) / dt : 0;
+    prevPullX = pullX; prevPullY = pullY; prevVX = vX; prevVY = vY;
+    // effective mass: feeding grows it (feedPow), and heavier presets too (1/presetFreqScale, since
+    // that scale ~ 1/M^0.21) -- so a heavier hole radiates a bigger wake for the same motion.
+    const massAmp = feedPow(MASS_SIZE_K) / Math.max(presetFreqScale, 1e-3);
+    const dragSource = massAmp * holeAccel * RIPPLE_DRAG_K;
+    dragRip = Math.max(dragRip * Math.exp(-dt / DRAG_RIP_TAU), dragSource); // top up, then fade
     const ripScale = isCoarse ? MOBILE_RIPPLE : DESKTOP_RIPPLE; // calmer on hand-held screens (nausea), heavier + stronger on desktop
-    const ripTarget = Math.min(wobRip + feedRip + moveRip + relRip, RIPPLE_CAP) * ripScale;
+    const ripTarget = Math.min(wobRip + feedRip + moveRip + dragRip + relRip, RIPPLE_CAP) * ripScale;
     ripShown += (ripTarget - ripShown) * RIP_EASE; // smooth so the ripple can't jolt the ring in one frame
     gl.uniform1f(uRipple, ripShown);
     // ripple frequency follows whichever mass is DRIVING the current ripple -- the live
@@ -840,6 +869,7 @@ void main() {
   function beginPinch() {
     multiTouch = true;
     clearTimeout(touchFeedTimer);          // a still-deferred 1st-finger feed: a fast pinch stays a fresh (non-feeding) zoom
+    feedArmed = false;                      // a pinch is never a feed
     pointerActive = false; pullTouch = false; swTouch = false;
     velX = 0; velY = 0;
     const pts = Array.from(pointers.values());
@@ -849,9 +879,9 @@ void main() {
   // press = feed: a tap of mass; holding pours more in (render()). the disk speed
   // follows mass, so feeding also energizes the streaks. nav stays in sync via mass.
   // a press on a control (the preset picker, a link, a button) shouldn't feed.
-  // mouse feeds immediately; a touch DEFERS its feed (startTouchFeed) so a second finger
-  // can turn the gesture into a pinch before any feed happens. a touch also starts swipe
-  // tracking (a horizontal/vertical swipe cycles presets).
+  // mouse feeds immediately on press. touch feeds ONLY on a double-tap-and-hold (the 2nd tap held);
+  // a lone touch just pulls + can swipe (a horizontal swipe cycles presets). the armed feed is still
+  // deferred (startTouchFeed) so a 2nd finger can turn it into a pinch before any feed happens.
   function onPointerDown(e) {
     swTouch = false;
     if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input')) return;
@@ -861,27 +891,28 @@ void main() {
         panning = true; panLastX = e.clientX; panLastY = e.clientY;
         return;
       }
-      dragging = true;     // grab: onPointerMove now drives the spring (set before so it picks up dragging)
-      onPointerMove(e);
-      pressed = true;
-      massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
-      // NOTE: don't clear relRip here. a still-fading release ring is left to decay on its own
-      // (relTau) so reclicking can't make it vanish/snap -- the new feed's ripple just sums with
-      // it, and the frequency stays tied to the ring while it lasts (see `ringing` in render).
+      dragging = true;     // left-drag GRABS the hole (the spring). feeding is the SPACEBAR now, not the click.
+      onPointerMove(e);    // onPointerMove drives the grab spring (set dragging first so it picks it up)
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size >= 2) { clearTimeout(touchFeedTimer); beginPinch(); return; } // 2nd finger: pinch-zoom, never feeds
     swTouch = true; swX = e.clientX; swY = e.clientY; swT = e.timeStamp; swPullX = pullX; swPullY = pullY;
-    onPointerMove(e); // pull tracks the finger right away; feeding waits (deferred below)
+    onPointerMove(e); // pull tracks the finger right away
+    // FEED only on a double-tap-and-hold: arm feeding ONLY if this down is the 2nd tap of a quick
+    // double-tap near the 1st. a lone touch just pulls/swipes (no feed). the held 2nd tap then feeds
+    // (deferred so a 3rd-finger pinch can still cancel it). consume firstTapT so a 3rd tap needs a fresh 1st.
+    feedArmed = (e.timeStamp - firstTapT) < DOUBLE_TAP_MS &&
+                Math.hypot(e.clientX - firstTapX, e.clientY - firstTapY) < DOUBLE_TAP_DIST;
+    firstTapT = 0;
     clearTimeout(touchFeedTimer);
-    touchFeedTimer = setTimeout(startTouchFeed, TOUCH_FEED_DELAY);
+    if (feedArmed) touchFeedTimer = setTimeout(startTouchFeed, TOUCH_FEED_DELAY);
   }
   // fires TOUCH_FEED_DELAY after a single touch lands: if it's still one finger (not a
   // pinch, not lifted), begin feeding. a very fast tap that releases before this simply
   // doesn't feed (the deferral is what keeps a pinch from ever feeding).
   function startTouchFeed() {
-    if (multiTouch || pointers.size !== 1) return; // a 2nd finger or a lift beat the timer
+    if (!feedArmed || multiTouch || pointers.size !== 1) return; // not a double-tap-hold, or a 2nd finger / lift beat the timer
     pressed = true;
     massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
     // don't clear relRip (see the note in onPointerDown): a lingering release ring decays on its own
@@ -897,7 +928,7 @@ void main() {
       if (pointers.size < 2) { try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (err) { /* private mode / file:// */ } }
       if (pointers.size === 0) {
         multiTouch = false;                    // LAST finger up: release the feed (collapse) + re-enable single-finger gestures
-        pressed = false; pointerActive = false;
+        pressed = false; pointerActive = false; feedArmed = false;
       }
       // size >= 1: stay frozen. an active feed keeps pouring (pressed untouched), the hole holds
       // its position (no pull), and a 2nd finger still zooms -- dropping to one finger never
@@ -905,12 +936,13 @@ void main() {
       return;
     }
     clearTimeout(touchFeedTimer);
-    pressed = false;
     if (e.pointerType === 'mouse') {
       // release the grab: drop pointerActive so the spring coasts on its last velocity (the
       // mobile-style throw). the next hover move re-activates and flips pullTouch back to drift.
+      // does NOT touch `pressed` -- desktop feeding is the spacebar, independent of the mouse.
       if (dragging) { dragging = false; pointerActive = false; }
     } else {
+      pressed = false;       // touch double-tap-hold feed ended
       pointerActive = false;
     }
     if (swTouch) {
@@ -936,10 +968,18 @@ void main() {
           cyclePreset(dx < 0 ? 1 : -1, dx, dy, strength);      // left = next, right = previous
         }
       }
+      // remember a quick, near-stationary tap as the FIRST tap of a potential double-tap-hold feed
+      // (not a hold/drag/swipe, and not the held 2nd tap itself)
+      if (!feedArmed && dt < TAP_MAX_MS && Math.hypot(dx, dy) < DOUBLE_TAP_DIST) {
+        firstTapT = e.timeStamp; firstTapX = e.clientX; firstTapY = e.clientY;
+      } else {
+        firstTapT = 0;
+      }
       swTouch = false;
     }
+    feedArmed = false;   // this touch ended; the next feed needs a fresh double-tap
   }
-  function onMouseLeave() { pointerActive = false; pressed = false; dragging = false; panning = false; }
+  function onMouseLeave() { pointerActive = false; dragging = false; panning = false; }  // feeding is the spacebar (keyboard), so leaving the window doesn't stop it
 
   // all fingers are physically up (touches.length === 0): clear any stale pinch/feed state
   // a dropped pointerup may have left behind, so single-finger gestures work again. only acts
@@ -951,6 +991,7 @@ void main() {
       multiTouch = false;
       pressed = false;
       pointerActive = false;
+      feedArmed = false;
       clearTimeout(touchFeedTimer);
     }
   }
@@ -1000,6 +1041,15 @@ void main() {
   function onKeyDown(e) {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    // SPACEBAR = feed (desktop; replaces click-hold). hold to keep feeding; the mass accumulates in
+    // render() while `pressed`. debounced like the arrow zoom so X11 auto-repeat can't strobe it.
+    // (relRip is intentionally NOT cleared on a re-press, so a fading release ring decays on its own.)
+    if (e.key === ' ' || e.code === 'Space') {
+      e.preventDefault();                  // space would otherwise scroll the page
+      clearTimeout(spaceUpTimer);          // a repeat's keydown cancels the pending stop
+      if (!pressed) { pressed = true; massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX); }  // one tap on the initial press; repeats just hold
+      return;
+    }
     // up/down = CAMERA zoom. while held, render() zooms CONTINUOUSLY (smooth, no discrete jump);
     // reduced-motion (no render loop) falls back to one KEY_ZOOM_STEP per press.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -1026,6 +1076,10 @@ void main() {
         keyZoomDir = 0;
         try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (err) { /* private mode / file:// */ }
       }, 60);
+    }
+    if (e.key === ' ' || e.code === 'Space') {            // stop the spacebar feed (debounced vs auto-repeat)
+      clearTimeout(spaceUpTimer);
+      spaceUpTimer = setTimeout(function () { pressed = false; }, 60);
     }
   }
 
