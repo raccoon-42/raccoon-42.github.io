@@ -39,6 +39,7 @@
   const VIEW_MAX = 0.6;  // ceiling: wide/desktop screens cap here (was 1.0) so the hole isn't too zoomed -- leaves room to see beyond the event horizon
   const ZOOM_MIN = 0.02;  // floor on the camera zoom (only a guard: iCamZoom divides p, so 0 would blow up). effectively infinite zoom-OUT
   const WHEEL_ZOOM_K = 0.0015; // desktop wheel: camZoom *= e^(-deltaY*K) per notch (~100px notch -> ~1.16x). scroll up = zoom IN (no upper cap), scroll down = zoom OUT (floored at ZOOM_MIN)
+  const KEY_ZOOM_STEP = 1.18;  // desktop arrow keys: up = camZoom * this (zoom IN), down = / this (zoom OUT). left/right cycle presets
   const EH_ZOOM_REF = 0.07; // desktop: shadow screen-height fraction below which no extra zoom-out (compact-disk presets already sit small; QUASAR/BLAZAR are ~0.05-0.06)
   const EH_ZOOM_K = 3.5;    // desktop: how hard a WIDER event horizon is zoomed out -> presetScale /= 1 + this*(shadowFrac - EH_ZOOM_REF). bigger = the wide-shadow looks (M87, GARGANTUA) zoom out more; 0 = off (disk-normalized only)
   const INFLOW_SPEED = 0.6;  // how fast the disk's matter spirals inward while you hold (drives INFALL_K in the shader; 0 = off)
@@ -969,17 +970,17 @@ void main() {
     window.addEventListener('devicemotion', onMotion);
   }
 
-  // desktop: arrow keys cycle presets (right/down = next, left/up = previous),
-  // throwing the landing wobble in the arrow's direction. when the picker <select>
-  // is focused, let it handle arrows natively (its change still cycles + wobbles).
+  // desktop: left/right arrows cycle presets (right = next, left = previous), throwing the
+  // landing wobble in the arrow's direction; up/down arrows CAMERA-zoom (up = in, down = out).
+  // when the picker <select> is focused, let it handle arrows natively (its change still cycles).
   function onKeyDown(e) {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'ArrowUp') { e.preventDefault(); setZoom(camZoom * KEY_ZOOM_STEP); return; }   // up = zoom in (no upper cap)
+    if (e.key === 'ArrowDown') { e.preventDefault(); setZoom(camZoom / KEY_ZOOM_STEP); return; } // down = zoom out (floored at ZOOM_MIN)
     let dir = 0, dx = 0, dy = 0;
     if (e.key === 'ArrowRight') { dir = 1; dx = 1; }
     else if (e.key === 'ArrowLeft') { dir = -1; dx = -1; }
-    else if (e.key === 'ArrowDown') { dir = 1; dy = 1; }
-    else if (e.key === 'ArrowUp') { dir = -1; dy = -1; }
     else return;
     e.preventDefault();
     cyclePreset(dir, dx, dy, 1.2);
