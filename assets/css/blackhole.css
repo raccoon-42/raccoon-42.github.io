@@ -97,6 +97,13 @@ body.bh-scene .bh-back svg { display: block; }
 body.bh-void .nav-menu,
 body.bh-void .nav-toggle { display: none; }
 
+/* 404 (the bh-scene page that isn't void): drop the lensed nav links on DESKTOP so the scene stays
+   uncluttered. desktop-only -- mobile keeps its hamburger. the now zero-size links are skipped by
+   drawNav (r.width === 0), so no ghost bent labels get baked into the lens field. GitHub icon stays. */
+@media (min-width: 42em) {
+    body.bh-scene:not(.bh-void) .nav-menu { display: none; }
+}
+
 /* the theme toggle is a no-op here (this page is a forced dark scene) */
 body.bh-scene #theme-toggle { display: none; }
 
@@ -139,28 +146,44 @@ body.bh-scene header {
 body.bh-scene .header-inner { display: block; }
 body.bh-scene header .content { text-align: center; }
 
-/* "home" stays intact: the one thing that doesn't fall into the hole */
+/* "home" stays intact: the one thing that doesn't fall into the hole. styled as a terminal prompt
+   rather than a floating button -- the field IS the Ghostty terminal look, so the way out of the 404
+   is a command you run: "$ go home" with a blinking block cursor. no pill, no clearing blob; it just
+   reads as a live prompt awaiting you. legibility comes from a tight dark halo on the glyphs only. */
 body.bh-scene .home-link {
     display: inline-block;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     font-size: 1em;
     letter-spacing: 0.04em;
-    color: #f1f4f9;
+    color: #d6deec;
     text-decoration: none;
-    padding: 0.4em 1.1em;
-    border-radius: 999px;
-    background: rgba(4, 5, 10, 0.85);
-    /* smooth clearing, weighted downward (more layers = softer falloff) so it
-       fades out gradually and never reaches the line above */
-    box-shadow: 0 0 14px 7px rgba(4, 5, 10, 0.82),
-                0 8px 30px 13px rgba(4, 5, 10, 0.56),
-                0 20px 54px 22px rgba(4, 5, 10, 0.34),
-                0 36px 86px 32px rgba(4, 5, 10, 0.18),
-                0 54px 120px 44px rgba(4, 5, 10, 0.08);
-    text-shadow: 0 1px 6px #000;
-    transition: color 140ms;
+    background: none;
+    text-shadow: 0 0 4px #000, 0 0 9px #000, 0 0 16px rgba(0, 0, 0, 0.8), 0 1px 2px #000;
+    transition: color 160ms;
+}
+/* the shell prompt sigil (dim, recedes into the field's voice) */
+body.bh-scene .home-link::before {
+    content: "$ ";
+    color: #7e889e;
+}
+/* blinking block cursor: the prompt is live, waiting for you to run it */
+body.bh-scene .home-link::after {
+    content: "";
+    display: inline-block;
+    width: 0.52em;
+    height: 1.05em;
+    margin-left: 0.16em;
+    vertical-align: -0.16em;
+    background: #e6edf3;
+    box-shadow: 0 0 6px rgba(150, 185, 255, 0.5);   /* faint lensed-light glow */
+    animation: bh-caret 1.06s step-end infinite;
 }
 body.bh-scene .home-link:hover { color: #fff; }
+body.bh-scene .home-link:hover::after { animation: none; opacity: 1; }
+@keyframes bh-caret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+    body.bh-scene .home-link::after { animation: none; }
+}
 
 /* the line sits plainly over the field (no clearing of its own); the gap below
    keeps the go-home fade from reaching it */
