@@ -38,7 +38,7 @@
   const VIEW_MIN = 0.33; // floor for that base size (never smaller than this fraction)
   const VIEW_MAX = 0.6;  // ceiling: wide/desktop screens cap here (was 1.0) so the hole isn't too zoomed -- leaves room to see beyond the event horizon
   const ZOOM_MIN = 0.02;  // floor on the camera zoom (only a guard: iCamZoom divides p, so 0 would blow up). effectively infinite zoom-OUT
-  const ZOOM_STEP = 1.18; // multiply/divide camZoom by this per +/- tap. no upper cap -> infinite zoom-IN (keep tapping +)
+  const WHEEL_ZOOM_K = 0.0015; // desktop wheel: camZoom *= e^(-deltaY*K) per notch (~100px notch -> ~1.16x). scroll up = zoom IN (no upper cap), scroll down = zoom OUT (floored at ZOOM_MIN)
   const EH_ZOOM_REF = 0.07; // desktop: shadow screen-height fraction below which no extra zoom-out (compact-disk presets already sit small; QUASAR/BLAZAR are ~0.05-0.06)
   const EH_ZOOM_K = 3.5;    // desktop: how hard a WIDER event horizon is zoomed out -> presetScale /= 1 + this*(shadowFrac - EH_ZOOM_REF). bigger = the wide-shadow looks (M87, GARGANTUA) zoom out more; 0 = off (disk-normalized only)
   const INFLOW_SPEED = 0.6;  // how fast the disk's matter spirals inward while you hold (drives INFALL_K in the shader; 0 = off)
@@ -120,9 +120,10 @@ void main() {
   }
 
   const B_CRIT = 2.5980762;  // shadow radius in r_s; matches the shader
-  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, uCamZoom, tex, raf = 0, startT = 0;
+  let prog, uRes, uTime, uCursor, uDiskTime, uMass, uFlare, uInflow, uRipple, uDiskWob, uDriftScale, uRipFreq, uRipPhase, uCamZoom, uCamPan, tex, raf = 0, startT = 0;
   let pullX = 0, pullY = 0, tgtPullX = 0, tgtPullY = 0; // hole's drift toward the pointer (uv offset)
   let velX = 0, velY = 0, pointerActive = false, pressed = false, pullTouch = false; // pull momentum + press state (touch = faster follow)
+  let dragging = false;                                 // desktop: mouse button held -> grab the hole with the touch-style spring (momentum + coast); released = hover-drift again
   let diskTime = 0, lastMs = 0;                        // disk-streak warped clock (speed follows mass)
   let mass = 1.0, massTarget = 1.0, prevMass = 1.0;    // hole size: accumulates when fed, snaps back on release
   let relT = 0, relM0 = 1.0, collapsing = false;       // release collapse: the swift accelerating snap from fed mass back to baseline
@@ -138,6 +139,8 @@ void main() {
   let driftScale = 1.0;                                // autonomous sin-drift scale (always on; kept as a uniform the shader reads)
   let baseScale = 1.0, szEff = 1.0;                    // responsive base size (per viewport) x the fed size
   let camZoom = 1.0;                                    // manual +/- CAMERA zoom (FOV: scales the whole scene -- hole, disk, lensing, background -- together); via iCamZoom; persisted in localStorage
+  let panX = 0, panY = 0;                               // manual CAMERA pan in uv (middle-mouse drag): slides the WHOLE scene 1:1 on screen; via iCamPan. session-only (re-centers on reload, since there's no reset button)
+  let panning = false, panLastX = 0, panLastY = 0;     // middle (wheel) button held -> 1:1 view pan; last client pos to diff against
   let inflowPhase = 0;                                 // accumulated infall (grows while held, drives the disk's inward spiral)
   let cfg = null;            // shader constants parsed from the frag (kept in sync)
   let navItems = [];         // nav links + their natural-position uv, for click tracking
@@ -293,8 +296,9 @@ void main() {
       }
       // camera zoom moves each link's anchor outward from center by (cz-1) and scales its
       // bend by cz (matches the shader's p/iCamZoom). reduces to dx*H, dy*H when cz = 1.
-      const tx = ((cz - 1) * px + cz * dx) * H;
-      const ty = ((cz - 1) * py + cz * dy) * H;
+      // camera pan then slides every link 1:1 with the scene (matches uv - iCamPan).
+      const tx = ((cz - 1) * px + cz * dx) * H + panX * W;
+      const ty = ((cz - 1) * py + cz * dy) * H + panY * H;
       it.el.style.transform = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px)';
     }
   }
@@ -347,6 +351,7 @@ void main() {
     uRipFreq = gl.getUniformLocation(prog, 'iRipFreq');
     uRipPhase = gl.getUniformLocation(prog, 'iRipPhase');
     uCamZoom = gl.getUniformLocation(prog, 'iCamZoom');
+    uCamPan = gl.getUniformLocation(prog, 'iCamPan');
     gl.uniform1i(gl.getUniformLocation(prog, 'iChannel0'), 0);
   }
 
@@ -494,7 +499,16 @@ void main() {
       }
     }
     addPresetPicker(initial);
-    addZoomControls();
+    loadZoom();
+    if (!isCoarse) {
+      window.addEventListener('wheel', onWheel, { passive: false }); // desktop wheel zoom; mobile uses pinch
+      // middle-button autoscroll (Chrome/Windows) fires off mousedown, which pointerdown's
+      // preventDefault doesn't reliably stop -- suppress it here so a pan-drag doesn't fight it.
+      // skip links/controls so their native middle-click (open in new tab) still works.
+      window.addEventListener('mousedown', function (e) {
+        if (e.button === 1 && !(e.target.closest && e.target.closest('.bh-preset, a, button, select, input'))) e.preventDefault();
+      });
+    }
     start();
   }
 
@@ -642,6 +656,7 @@ void main() {
     gl.uniform1f(uDriftScale, driftScale);
     gl.uniform1f(uMass, szEff);
     gl.uniform1f(uCamZoom, camZoom);
+    gl.uniform2f(uCamPan, panX, panY);
     gl.uniform1f(uFlare, flare);
     gl.uniform1f(uInflow, inflowPhase);
     // spacetime vibration: feeding shakes the fabric (sustained) and the size *changing*
@@ -736,6 +751,7 @@ void main() {
       szEff = baseScale * presetScale * feedPow(MASS_SIZE_K);
       gl.uniform1f(uMass, szEff);
       gl.uniform1f(uCamZoom, camZoom);
+      gl.uniform2f(uCamPan, panX, panY);
       gl.uniform1f(uFlare, feedPow(MASS_LUM_K) / feedPow(MASS_SIZE_K * FLARE_ZOOM_COMP));
       gl.uniform1f(uInflow, inflowPhase);
       gl.uniform1f(uRipple, 0.0); // no wobble ripple in the static (reduced-motion) frame
@@ -770,6 +786,14 @@ void main() {
   // momentum + coast live in render(). nav tracking uses the same pull.
   function onPointerMove(e) {
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (panning) {                            // middle-button camera pan: slide the whole view 1:1 with the mouse
+      if ((e.buttons & 4) === 0) { panning = false; return; } // button released without a pointerup we saw -> stop
+      panX += (e.clientX - panLastX) / window.innerWidth;
+      panY += (e.clientY - panLastY) / window.innerHeight;
+      panLastX = e.clientX; panLastY = e.clientY;
+      if (reduceMotion) start();
+      return;
+    }
     if (multiTouch) {                         // pinch in progress: spread/squeeze the fingers to zoom, no pull
       if (pointers.size >= 2) {
         const pts = Array.from(pointers.values());
@@ -782,7 +806,9 @@ void main() {
     tgtPullX = (e.clientX / window.innerWidth - 0.5) * CURSOR_PULL;
     tgtPullY = (e.clientY / window.innerHeight - 0.5) * CURSOR_PULL;
     pointerActive = true;
-    pullTouch = (e.pointerType !== 'mouse'); // touch drifts faster than the slow mouse hover
+    // touch always uses the heavy spring; a mouse uses the slow hover-drift UNTIL the button
+    // is held (dragging) -- then it grabs the hole with that same spring (momentum + coast).
+    pullTouch = (e.pointerType !== 'mouse') || dragging;
   }
 
   // a second finger landed: add a pinch-zoom ON TOP of whatever the first finger was doing.
@@ -810,6 +836,12 @@ void main() {
     swTouch = false;
     if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input')) return;
     if (e.pointerType === 'mouse') {
+      if (e.button === 1) {                 // middle (wheel) button: start a 1:1 camera pan -- no feed, no hole-grab
+        e.preventDefault();                 // suppress the browser's middle-click autoscroll
+        panning = true; panLastX = e.clientX; panLastY = e.clientY;
+        return;
+      }
+      dragging = true;     // grab: onPointerMove now drives the spring (set before so it picks up dragging)
       onPointerMove(e);
       pressed = true;
       massTarget = Math.min(massTarget + FEED_TAP, MASS_MAX);
@@ -840,6 +872,7 @@ void main() {
   // left/up = next, right/down = previous. the throw follows the swipe vector.
   function onPointerUp(e) {
     if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
+    if (panning && e.pointerType === 'mouse') { panning = false; return; } // middle button up: end the pan, no feed-release/swipe
     if (multiTouch) {                          // lifting a finger out of a pinch
       if (pointers.size < 2) { try { localStorage.setItem('bh-zoom', String(camZoom)); } catch (err) { /* private mode / file:// */ } }
       if (pointers.size === 0) {
@@ -853,7 +886,13 @@ void main() {
     }
     clearTimeout(touchFeedTimer);
     pressed = false;
-    if (e.pointerType !== 'mouse') pointerActive = false;
+    if (e.pointerType === 'mouse') {
+      // release the grab: drop pointerActive so the spring coasts on its last velocity (the
+      // mobile-style throw). the next hover move re-activates and flips pullTouch back to drift.
+      if (dragging) { dragging = false; pointerActive = false; }
+    } else {
+      pointerActive = false;
+    }
     if (swTouch) {
       const dx = e.clientX - swX, dy = e.clientY - swY, dt = e.timeStamp - swT;
       const adx = Math.abs(dx), ady = Math.abs(dy);
@@ -875,7 +914,7 @@ void main() {
       swTouch = false;
     }
   }
-  function onMouseLeave() { pointerActive = false; pressed = false; }
+  function onMouseLeave() { pointerActive = false; pressed = false; dragging = false; panning = false; }
 
   // all fingers are physically up (touches.length === 0): clear any stale pinch/feed state
   // a dropped pointerup may have left behind, so single-finger gestures work again. only acts
@@ -979,27 +1018,22 @@ void main() {
     if (reduceMotion) start();
   }
 
-  // bottom-right [-] [reset] [+] to CAMERA-zoom the whole scene in/out (DESKTOP only;
-  // mobile pinch-zooms instead). buttons are <button>, which the press-guard already
-  // excludes, so tapping them never feeds the hole.
-  function addZoomControls() {
+  // restore the last CAMERA-zoom level from a previous visit (desktop wheel / mobile pinch
+  // both persist it on change). a guard against junk/zero so iCamZoom never divides by 0.
+  function loadZoom() {
     try { const z = parseFloat(localStorage.getItem('bh-zoom')); if (isFinite(z) && z > 0) camZoom = Math.max(ZOOM_MIN, z); } catch (e) { /* ignore */ }
-    if (isCoarse) return;        // touch screens use the pinch gesture; no on-screen buttons
-    const wrap = document.createElement('div');
-    wrap.className = 'bh-zoom';
-    const mk = function (sym, label, onClick) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'bh-zoom-btn';
-      b.textContent = sym;
-      b.setAttribute('aria-label', label);
-      b.addEventListener('click', onClick);
-      return b;
-    };
-    wrap.appendChild(mk('−', 'zoom out', function () { setZoom(camZoom / ZOOM_STEP); })); // U+2212 minus
-    wrap.appendChild(mk('↺', 'reset zoom', function () { setZoom(1.0); }));               // back to 1x
-    wrap.appendChild(mk('+', 'zoom in', function () { setZoom(camZoom * ZOOM_STEP); }));
-    document.body.appendChild(wrap);
+  }
+
+  // desktop: the mouse wheel CAMERA-zooms the whole scene (mobile pinch-zooms instead).
+  // scroll up = zoom in (no upper cap), scroll down = zoom out. preventDefault stops the
+  // page from scrolling under the full-screen canvas. deltaMode is normalized so line/page
+  // wheels (Firefox, some mice) zoom by a comparable amount to pixel wheels.
+  function onWheel(e) {
+    e.preventDefault();
+    let d = e.deltaY;
+    if (e.deltaMode === 1) d *= 16;                       // lines -> ~px
+    else if (e.deltaMode === 2) d *= window.innerHeight;  // pages -> ~px
+    setZoom(camZoom * Math.exp(-d * WHEEL_ZOOM_K));       // up (d<0) zooms in; setZoom floors + persists
   }
 
   fetch('/assets/shaders/blackhole.frag', { cache: 'no-cache' }) // always revalidate so shader edits aren't served stale

@@ -29,6 +29,7 @@ uniform float     iDriftScale;  // 1 = autonomous sin-drift on; faded to 0 on mo
 uniform float     iRipFreq;     // ripple frequency scale (1 = baseline). <1 makes the fabric + disk ring as fewer/bigger/slower waves -- a heavier hole rings lower. set in blackhole.js
 uniform float     iRipPhase;    // accumulated ripple time-phase = integral of iRipFreq dt (wrapped). use THIS, not iTime, for the ripple's temporal term: a changing frequency must not jump the phase (which iTime*freq does, worse as iTime grows). set in blackhole.js
 uniform float     iCamZoom;    // manual CAMERA zoom: scales the screen->scene mapping around the hole, so the hole, disk, lensing AND background all zoom together (1 = none, >1 = zoom in / everything bigger). a FOV change, distinct from iMass (which grows the hole itself). set in blackhole.js
+uniform vec2      iCamPan;     // manual CAMERA pan (uv): subtracted from uv so the WHOLE composed scene -- hole, disk, lensing AND background -- slides 1:1 on screen (zoom-independent). distinct from iCursor, which only moves the hole over a fixed background. set in blackhole.js (middle-mouse drag)
 uniform sampler2D iChannel0;   // the lens plane: the "404" text, warped near the hole
 
 out vec4 outColor;
@@ -193,7 +194,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // aspect-corrected frame centered on the hole (y in units of screen height).
     // dividing by iCamZoom is a CAMERA zoom: a pixel maps to a smaller scene offset, so the
     // shadow, disk, lensing + the sampled background ALL scale together around the hole.
-    vec2  p    = (uv - center) * vec2(aspect, 1.0) / iCamZoom;
+    vec2  p    = (uv - iCamPan - center) * vec2(aspect, 1.0) / iCamZoom;
     float plen = length(p);
 
     // screen <-> world mapping: shadow's angular size is B_CRIT r_s, wanted rh
