@@ -213,6 +213,7 @@ void main() {
 
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tcvs);
+    gl.generateMipmap(gl.TEXTURE_2D); // rebuild the mip chain for the new field (WebGL2: NPOT ok); MIN_FILTER samples it to kill zoom-out shimmer
   }
 
   // draw the nav labels into the lens plane so they bend with the field. The
@@ -450,10 +451,19 @@ void main() {
     gl.bindVertexArray(gl.createVertexArray());
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    // trilinear mipmaps: minification (zoom-OUT, and the lens compression near the hole) packs
+    // many texels into one pixel; with a plain LINEAR filter that aliases, so the always-on drift
+    // makes the dense text crawl/shimmer ("shaky" zoomed out). mipmaps pre-average each level so
+    // the GPU picks one matching the on-screen density -> no shimmer. MAG stays LINEAR (zoom-IN /
+    // 1:1 reads the sharp base level, unaffected). mipmaps are (re)built per texture upload below.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); // horizontal: padded + mirrored in texSample
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);        // vertical: texture is a whole line-period multiple -> tiles seamlessly top/bottom
+    // anisotropic filtering keeps the text crisp (not over-blurred to gray) where it's minified at a
+    // grazing angle / under the lens stretch, instead of trilinear's isotropic smear. optional ext.
+    const aniso = gl.getExtension('EXT_texture_filter_anisotropic') || gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic');
+    if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)); // GPU max (usually 16x): sharpest minified text + most directional anti-alias
     gl.activeTexture(gl.TEXTURE0);
 
     const p = compileProgram(fragWithPreset(initial));
