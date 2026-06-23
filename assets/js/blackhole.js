@@ -284,7 +284,8 @@ void main() {
     const Z0 = Math.max(14, cfg.rout + 5), bmax = cfg.rout + 3;
     for (let i = 0; i < navItems.length; i++) {
       const it = navItems[i];
-      const px = (it.ux - cx) * aspect, py = it.uy - cy;
+      const px = (it.ux - cx) * aspect, py = it.uy - cy;        // hole-relative: drives the lensing bend
+      const pxC = (it.ux - 0.5) * aspect, pyC = it.uy - 0.5;    // screen-center-relative: drives the zoom (camera pivots on the fixed center, not the moving hole -- matches bgBase in the shader)
       const plen = Math.max(Math.hypot(px, py), 1e-5);
       const b = plen * Wm;
       const win = Math.exp(-Math.pow(plen / (7 * rh), 2));
@@ -296,11 +297,11 @@ void main() {
         dx = (px / plen) * defl - cfg.warpLean * py * win;
         dy = (py / plen) * defl;
       }
-      // camera zoom moves each link's anchor outward from center by (cz-1) and scales its
-      // bend by cz (matches the shader's p/iCamZoom). reduces to dx*H, dy*H when cz = 1.
-      // camera pan then slides every link 1:1 with the scene (matches uv - iCamPan).
-      const tx = ((cz - 1) * px + cz * dx) * H + panX * W;
-      const ty = ((cz - 1) * py + cz * dy) * H + panY * H;
+      // camera zoom moves each link's anchor outward from the SCREEN CENTER by (cz-1) (pivot is the
+      // fixed center, not the moving hole -- matches bgBase) and scales its bend by cz. reduces to
+      // dx*H, dy*H when cz = 1. camera pan then slides every link 1:1 with the scene (uv - iCamPan).
+      const tx = ((cz - 1) * pxC + cz * dx) * H + panX * W;
+      const ty = ((cz - 1) * pyC + cz * dy) * H + panY * H;
       it.el.style.transform = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px)';
     }
   }

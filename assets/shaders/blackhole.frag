@@ -327,6 +327,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2  p    = (uv - iCamPan - center) * vec2(aspect, 1.0) / iCamZoom;
     float plen = length(p);
 
+    // CAMERA-FIXED background position. the zoom must pivot on a FIXED screen point, NOT on the
+    // moving hole -- otherwise at iCamZoom > 1 the far-bg coord (center + p/A = center*(1-1/zoom) +
+    // (uv-pan)/zoom) picks up `center`, so pulling/drifting the hole DRAGS the whole background
+    // ("camera moves" on a mobile pinch-zoomed hold). bgBase pivots the zoom on the screen center
+    // (0.5) instead, so the background stays put while the hole drifts. the lensing displacement
+    // (sp - p), still hole-relative, is added on top at the fetch sites. reduces to uv - iCamPan at
+    // iCamZoom = 1, so the resting/un-zoomed scene is byte-identical to before.
+    vec2  bgBase = vec2(0.5) + (uv - iCamPan - vec2(0.5)) / iCamZoom;
+
     // screen <-> world mapping: shadow's angular size is B_CRIT r_s, wanted rh
     // wide on screen, so 1 screen unit = W Schwarzschild radii.
     float W  = B_CRIT / max(rh, 1e-4);
@@ -390,7 +399,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec2  sp  = p - dir * defl * k;
         sp.x += WARP_LEAN * p.y * window * shield;  // lean (matches the near field)
         sp += ripOff;                               // shake the fabric (matches the near field)
-        suvFar[i] = texSample(center + sp / vec2(aspect, 1.0));
+        // sp - p is the lensing-only displacement (0 when undistorted); add it to the camera-fixed
+        // base so the hole's pull/drift can't drag the bg at zoom > 1. == center + sp/A at zoom = 1.
+        suvFar[i] = texSample(bgBase + (sp - p) / vec2(aspect, 1.0));
     }
     float bbf  = max(b, 1e-4);                       // floor so dFar is finite at the center
     vec3  dFar = normalize(vec3(-(pr / bbf) * (2.0 / bbf), -1.0));
@@ -454,7 +465,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 // the far field, so the two stay continuous across the handoff
                 samp.x += WARP_LEAN * p.y * window * shield;
                 samp += ripOff;                              // shake the fabric (matches the far field)
-                suvNear   = texSample(center + samp / vec2(aspect, 1.0));
+                // camera-fixed base + lensing-only displacement (samp - p), as in the far field
+                suvNear   = texSample(bgBase + (samp - p) / vec2(aspect, 1.0));
                 // rays bent past ~90deg never reach the plane; fade to the starfield
                 bgVisNear = smoothstep(0.05, 0.35, -d.z);
             } else {
