@@ -378,9 +378,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                * (1.29 * u + 0.07) * max(LENS_DEPTH - 2.14 * u + 0.75, 0.0)
                * window * shield;
     vec2  dir  = p / max(plen, 1e-5);
-    // mild chromatic aberration near the handoff circle (per-channel UV split).
-    // ab is 0 for b <= bmax (smoothstep starts at b/bmax = 1), so the split exists
-    // ONLY in the far field where wn = 0 -> no aberration discontinuity at the seam.
+    // chromatic aberration on the lensed text near the handoff circle (per-channel UV split).
+    // DELIBERATE AESTHETIC, not physics: real gravitational lensing is achromatic (deflection is
+    // wavelength-independent in GR), so this fringe is a cinematic camera-lens touch kept on purpose
+    // (Ali's call, eyes-open). set the 0.035 to 0 to remove it. ab is 0 for b <= bmax (smoothstep
+    // starts at b/bmax = 1), so the split lives ONLY in the far field where wn = 0 -> no seam.
     float ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
     vec2  suvFar[3];
     for (int i = 0; i < 3; i++) {
