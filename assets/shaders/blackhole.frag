@@ -70,6 +70,26 @@ const float DISK_RIP_BRIGHT= 0.4;    // brightness pulse of the disk rings
 #define N_STEPS 36                    // geodesic integration steps per near-field pixel
 #define B_CRIT 2.5980762              // critical impact parameter (shadow radius), in r_s
 
+// inner-ring anti-aliasing. the accretion disk is PROCEDURAL (computed per ray, no texture to
+// mipmap), so when zoomed OUT its thin inner edge falls between pixel centers and drops out
+// (the background text is fine -- it's a real texture w/ mipmaps + anisotropy). fix = brute-force
+// supersample the DISK only: trace extra jittered rays per pixel and average their emission +
+// transmittance. NEAR-FIELD ONLY (gated by b<bmax) so the far field pays nothing -- and crucially
+// the disk path has NO texture() fetch, so this branchy/supersampled flow keeps NVIDIA's implicit
+// mip-LOD derivatives defined (the bg fetch stays single-sampled + in uniform flow, deferred to the
+// end -- do NOT move a texture() in here). cost ~ (DISK_AA+1)x the geodesic for near-hole pixels,
+// which is a tiny on-screen region exactly when zoomed out (the case that needs it). 0 = off.
+#define DISK_AA 3                     // extra jittered disk rays/pixel (max 4 = AA_OFF length)
+// grazing-edge widening for the inner ring's lensed TOP arc (where supersampling alone isn't
+// enough). widens the inner-edge ramp by 1/|cos(incidence)| at the disk crossing, capped.
+#define INNER_AA_MAX 8.0              // max widening of the grazing inner edge (1.0 = off)
+#define INNER_AA_EPS 0.05             // floor on |cos(incidence)| so the widening stays bounded
+// rotated-grid sub-pixel offsets (pixels); paired with the center sample (the canonical trace)
+const vec2 AA_OFF[4] = vec2[4](
+    vec2( 0.375, -0.125), vec2(-0.125, -0.375),
+    vec2(-0.375,  0.125), vec2( 0.125,  0.375)
+);
+
 // the disk's whole look in one bundle
 struct DiskLook {
     float temp, incl, roll, inner, outer, opac, dopp, beam,
@@ -163,6 +183,112 @@ vec3 stars(vec3 d) {
     float tw    = 0.7 + 0.3 * sin(iTime * (0.5 + 2.0 * hash21(id + 5.1)) + 40.0 * h);
     vec3 tint   = mix(vec3(1.0, 0.82, 0.60), vec3(0.75, 0.85, 1.0), hash21(id + 2.9));
     return tint * spark * tw * ((h - 0.92) / 0.08);
+}
+
+// one geodesic ray: integrate the photon path and accumulate the accretion-disk emission it
+// pierces. PROCEDURAL ONLY (no texture() fetch), so it's safe to call inside the branchy /
+// supersampled near-field flow. returns the disk emission (HDR); outs the transmittance toward the
+// background and the ray's final state (xOut/vOut/capturedOut) so the caller can sample the
+// background from the CENTER ray. same math as before, just hoisted out of mainImage so the disk
+// can be supersampled by tracing this N times at jittered ray origins.
+vec3 traceRay(vec2 pr0, DiskLook L, vec3 n, vec3 e2, float sdir, float spd,
+              float rin, float rout, float dil, float Z0,
+              out float transOut, out vec3 xOut, out vec3 vOut, out bool capturedOut) {
+    vec3  x  = vec3(pr0, Z0);
+    vec3  v  = vec3(0.0, 0.0, -1.0);
+    float h2 = dot(pr0, pr0);
+    bool  captured = false;
+    float sPrev = dot(x, n);
+    vec3  xPrev = x;
+    vec3  emitc = vec3(0.0);
+    float trans = 1.0;
+
+    for (int i = 0; i < N_STEPS; i++) {
+        float r2 = dot(x, x);
+        if (r2 < 1.0) { captured = true; break; }   // through the horizon
+        if (x.z < -Z0 && v.z < 0.0) break;          // escaped out the back
+        if (r2 > 4.0 * Z0 * Z0) break;              // flung far sideways
+        float r  = sqrt(r2);
+        float dt = clamp(0.16 * r, 0.03, 1.5);
+        // leapfrog (kick-drift-kick) keeps near-critical orbits stable
+        vec3 a = -1.5 * h2 * x / (r2 * r2 * r);
+        v += a * (0.5 * dt);
+        x += v * dt;
+        r2 = dot(x, x);
+        r  = sqrt(r2);
+        a  = -1.5 * h2 * x / (r2 * r2 * r);
+        v += a * (0.5 * dt);
+
+        // ---- thin-disk crossing: the ray pierced the disk plane ----
+        float s = dot(x, n);
+        if (s * sPrev < 0.0 && trans > 0.02) {
+            float tc = sPrev / (sPrev - s);
+            vec3  xc = mix(xPrev, x, tc);
+            float rc = length(xc);
+            if (rc > rin && rc < rout) {
+                // disk ripple: a radial wave (same iRipple envelope as the fabric, but
+                // slower) wobbles the bright ring's radius in/out + pulses its brightness
+                float diskRip = iRipple * sin(rc * DISK_RIP_FREQ * iRipFreq - iRipPhase * DISK_RIP_SPEED);
+                float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
+                // the TOP arc of the inner ring is the disk's far side lensed up and over the
+                // shadow, where the ray GRAZES the disk plane: there one screen pixel spans a huge
+                // radial range, so the fixed-width inner edge goes sub-pixel and flickers even with
+                // supersampling (extreme magnification would need ~20+ rays). widen the inner-edge
+                // ramp by the crossing obliquity (1/|cos| of the ray vs the disk normal) so its
+                // ON-SCREEN width can't collapse. face-on crossings (|cos|~1, the sharp front edge)
+                // are untouched -> the front inner edge stays crisp; only the grazing arc softens.
+                float obliq = abs(dot(normalize(v), n));        // ~cos(incidence) at the crossing
+                float widen = clamp(1.0 / max(obliq, INNER_AA_EPS), 1.0, INNER_AA_MAX);
+                float band = smoothstep(rin, rin + rin * 0.25 * widen, rcW)
+                           * (1.0 - smoothstep(rout * 0.70, rout, rcW));
+
+                float phi   = atan(dot(xc, e2), xc.x);
+                float turns = phi / 6.2831853;
+                float kep   = pow(rin / rc, 1.5);
+                float gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
+                // true Keplerian advection rate (inner orbits faster), signed
+                float rateS = kep * spd * gloc * dil * sdir;
+                // two copies advected by that rate but offset half a cycle; the
+                // crossfade weight is 0 at each copy's reset, hiding the renewal
+                float ph1   = fract(iDiskTime / DISK_CYCLE);
+                float ph2   = fract(iDiskTime / DISK_CYCLE + 0.5);
+                float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
+                float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
+                float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
+                // feeding drifts the streak pattern inward in radius -> matter spirals
+                // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
+                // (streaks follow the wobbled radius too, so the texture ripples with the ring)
+                float rcN   = rcW + iInflow * INFALL_K;
+                float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
+                float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
+                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
+                float streaks = mix(st2, st1, wx);
+                streaks = 0.35 + L.contr * streaks * streaks;
+
+                // relativistic Doppler + gravitational shift
+                vec3  gasdir = normalize(cross(n, xc)) * sdir;
+                float beta   = clamp(inversesqrt(max(2.0 * (rc - 1.0), 0.2)), 0.0, 0.99);
+                float g      = gloc / max(1.0 + beta * dot(gasdir, normalize(v)), 0.05);
+                g = mix(1.0, g, L.dopp);
+
+                float xpr   = max(1.0 - sqrt(rin / rc), 0.0);
+                float tprof = pow(rin / rc, 0.75) * pow(xpr, 0.25) / 0.488;
+                vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
+                float boost = pow(g, L.beam);
+
+                float density = band * streaks * max(0.0, 1.0 + diskRip * DISK_RIP_BRIGHT);
+                emitc += trans * cbb * (L.gain * 2.2 * density * tprof * tprof * boost);
+                trans *= 1.0 - clamp(L.opac * density, 0.0, 1.0);
+            }
+        }
+        sPrev = s;
+        xPrev = x;
+    }
+    if (!captured && dot(x, x) < 4.0) captured = true;
+
+    transOut = trans; xOut = x; vOut = v; capturedOut = captured;
+    return emitc;
 }
 
 // ------------------------------------------------------------------- image --
@@ -283,95 +409,34 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         // ====================== near field: trace the geodesic ==================
         // Parallel rays from a distant camera at +z. Hole at the origin, r_s = 1.
         // Integrate x'' = -(3/2) h^2 x / r^5 (exact Schwarzschild photon bending).
-        vec3  x  = vec3(pr, Z0);
-        vec3  v  = vec3(0.0, 0.0, -1.0);
-        float h2 = dot(pr, pr);
-
         float ci = cos(L.incl), si = sin(L.incl);
         vec3  n  = vec3(0.0, si, ci);           // disk-plane normal
         vec3  e2 = vec3(0.0, ci, -si);          // in-plane axis completing (x, e2, n)
         float sdir = L.speed < 0.0 ? -1.0 : 1.0;
         float spd  = abs(L.speed);
 
-        float sPrev = dot(x, n);
-        vec3  xPrev = x;
+        // center ray: drives BOTH the disk emission and the background sample (x/v below)
+        vec3  x, v;
+        emitc = traceRay(pr, L, n, e2, sdir, spd, rin, rout, dil, Z0, trans, x, v, captured);
 
-        for (int i = 0; i < N_STEPS; i++) {
-            float r2 = dot(x, x);
-            if (r2 < 1.0) { captured = true; break; }   // through the horizon
-            if (x.z < -Z0 && v.z < 0.0) break;          // escaped out the back
-            if (r2 > 4.0 * Z0 * Z0) break;              // flung far sideways
-            float r  = sqrt(r2);
-            float dt = clamp(0.16 * r, 0.03, 1.5);
-            // leapfrog (kick-drift-kick) keeps near-critical orbits stable
-            vec3 a = -1.5 * h2 * x / (r2 * r2 * r);
-            v += a * (0.5 * dt);
-            x += v * dt;
-            r2 = dot(x, x);
-            r  = sqrt(r2);
-            a  = -1.5 * h2 * x / (r2 * r2 * r);
-            v += a * (0.5 * dt);
-
-            // ---- thin-disk crossing: the ray pierced the disk plane ----
-            float s = dot(x, n);
-            if (s * sPrev < 0.0 && trans > 0.02) {
-                float tc = sPrev / (sPrev - s);
-                vec3  xc = mix(xPrev, x, tc);
-                float rc = length(xc);
-                if (rc > rin && rc < rout) {
-                    // disk ripple: a radial wave (same iRipple envelope as the fabric, but
-                    // slower) wobbles the bright ring's radius in/out + pulses its brightness
-                    float diskRip = iRipple * sin(rc * DISK_RIP_FREQ * iRipFreq - iRipPhase * DISK_RIP_SPEED);
-                    float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
-                    float band = smoothstep(rin, rin * 1.25, rcW)
-                               * (1.0 - smoothstep(rout * 0.70, rout, rcW));
-
-                    float phi   = atan(dot(xc, e2), xc.x);
-                    float turns = phi / 6.2831853;
-                    float kep   = pow(rin / rc, 1.5);
-                    float gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
-                    // true Keplerian advection rate (inner orbits faster), signed
-                    float rateS = kep * spd * gloc * dil * sdir;
-                    // two copies advected by that rate but offset half a cycle; the
-                    // crossfade weight is 0 at each copy's reset, hiding the renewal
-                    float ph1   = fract(iDiskTime / DISK_CYCLE);
-                    float ph2   = fract(iDiskTime / DISK_CYCLE + 0.5);
-                    float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
-                    float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
-                    float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
-                    // feeding drifts the streak pattern inward in radius -> matter spirals
-                    // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
-                    // (streaks follow the wobbled radius too, so the texture ripples with the ring)
-                    float rcN   = rcW + iInflow * INFALL_K;
-                    float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
-                                  vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
-                    float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
-                                  vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
-                    float streaks = mix(st2, st1, wx);
-                    streaks = 0.35 + L.contr * streaks * streaks;
-
-                    // relativistic Doppler + gravitational shift
-                    vec3  gasdir = normalize(cross(n, xc)) * sdir;
-                    float beta   = clamp(inversesqrt(max(2.0 * (rc - 1.0), 0.2)), 0.0, 0.99);
-                    float g      = gloc / max(1.0 + beta * dot(gasdir, normalize(v)), 0.05);
-                    g = mix(1.0, g, L.dopp);
-
-                    float xpr   = max(1.0 - sqrt(rin / rc), 0.0);
-                    float tprof = pow(rin / rc, 0.75) * pow(xpr, 0.25) / 0.488;
-                    vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
-                    float boost = pow(g, L.beam);
-
-                    float density = band * streaks * max(0.0, 1.0 + diskRip * DISK_RIP_BRIGHT);
-                    emitc += trans * cbb * (L.gain * 2.2 * density * tprof * tprof * boost);
-                    trans *= 1.0 - clamp(L.opac * density, 0.0, 1.0);
-                }
-            }
-            sPrev = s;
-            xPrev = x;
+#if DISK_AA > 0
+        // brute-force disk anti-aliasing: extra jittered rays, averaged, so the thin inner edge
+        // doesn't drop out between pixels when zoomed out. disk-only -> no texture() -> NVIDIA-safe.
+        // one screen pixel = vec2(aspect,1)/(res*iCamZoom) in p, which is 1/(res.y*iCamZoom) per axis.
+        vec3  eSum = emitc;
+        float tSum = trans;
+        for (int s = 0; s < DISK_AA; s++) {
+            vec2  pJ  = p + AA_OFF[s] / (res.y * iCamZoom);
+            vec2  prJ = rot(vec2(pJ.x, -pJ.y), L.roll) * W;
+            float tj; vec3 xj, vj; bool cj;
+            eSum += traceRay(prJ, L, n, e2, sdir, spd, rin, rout, dil, Z0, tj, xj, vj, cj);
+            tSum += tj;
         }
-        if (!captured && dot(x, x) < 4.0) captured = true;
+        emitc = eSum / float(DISK_AA + 1);
+        trans = tSum / float(DISK_AA + 1);
+#endif
 
-        // ---- background: where did the escaped ray come from? ----
+        // ---- background: where did the escaped (center) ray come from? ----
         if (!captured) {
             vec3 d = normalize(v);
             dNear  = d;
