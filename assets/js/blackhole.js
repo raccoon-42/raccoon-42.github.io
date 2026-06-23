@@ -458,7 +458,7 @@ void main() {
     // 1:1 reads the sharp base level, unaffected). mipmaps are (re)built per texture upload below.
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); // horizontal: padded + mirrored in texSample
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.MIRRORED_REPEAT); // horizontal: hardware mirror at the padded edge. NOT mirrored in texSample anymore -- doing it in-shader folds the coordinate so the mip-LOD derivative collapses at each fold = false sharp vertical lines at mid zoom. hardware mirrors AFTER LOD selection, so the LOD stays correct. (WebGL2 allows MIRRORED_REPEAT on NPOT.)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);        // vertical: texture is a whole line-period multiple -> tiles seamlessly top/bottom
     // anisotropic filtering keeps the text crisp (not over-blurred to gray) where it's minified at a
     // grazing angle / under the lens stretch, instead of trilinear's isotropic smear. optional ext.

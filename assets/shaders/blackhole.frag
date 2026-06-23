@@ -122,8 +122,12 @@ vec2 mirrorUV(vec2 u) { return 1.0 - abs(1.0 - mod(u, 2.0)); }
 //   rows (no mirror fold, no row-spacing jump). this is the "stitched top edge" fix.
 vec2 texSample(vec2 s) {
     float u = (s.x + TEX_MARGIN) / (1.0 + 2.0 * TEX_MARGIN);
-    float x = 1.0 - abs(1.0 - mod(u, 2.0));   // horizontal mirror within the padded width
-    return vec2(x, s.y);                       // vertical: raw, WRAP_T = REPEAT tiles it
+    // horizontal mirror is done by the HARDWARE (WRAP_S = MIRRORED_REPEAT), NOT here: we must
+    // pass the raw, monotonic u so the GPU computes the mip-LOD from a derivative that does NOT
+    // collapse at the fold. mirroring in-shader (1 - abs(1 - mod(u,2))) makes the coordinate
+    // symmetric at each fold, so a quad straddling it sees ~0 horizontal derivative -> false LOD 0
+    // -> a crisp vertical line at mid zoom. MIRRORED_REPEAT applies the same fold AFTER LOD, so no line.
+    return vec2(u, s.y);                       // vertical: raw too, WRAP_T = REPEAT tiles it
 }
 
 // unit Lissajous wander: incommensurate sines, never visibly repeats
@@ -233,149 +237,182 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     float bmax = rout + 3.0;                // rays beyond this can't touch the disk
     float Z0   = max(14.0, rout + 5.0);     // camera distance
+    const float BAND = 1.5;                 // far<->near UV blend width (r_s) just INSIDE bmax
 
-    // ================= far field: analytic weak deflection ==================
-    // escaped rays are projected back onto the lens plane; the displacement is
-    // faded by window so a distant pixel reads the text undistorted
-    if (b >= bmax) {
-        float u    = Z0 * inversesqrt(Z0 * Z0 + b * b);
-        float defl = (2.0 / (W * W)) / max(plen, 1e-4)
-                   * (1.29 * u + 0.07) * max(LENS_DEPTH - 2.14 * u + 0.75, 0.0)
-                   * window * shield;
-        vec2  dir  = p / max(plen, 1e-5);
-        vec3  term;
-        // mild chromatic aberration near the handoff circle
-        float ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
-        for (int i = 0; i < 3; i++) {
-            float k   = 1.0 + (float(i) - 1.0) * ab;
-            vec2  sp  = p - dir * defl * k;
-            sp.x += WARP_LEAN * p.y * window * shield;  // lean (matches the near field)
-            sp += ripOff;                               // shake the fabric (matches the near field)
-            vec2  suv = texSample(center + sp / vec2(aspect, 1.0));
-            term[i]   = texture(iChannel0, suv)[i];
-        }
-        vec3 d = normalize(vec3(-(pr / b) * (2.0 / b), -1.0));
-        fragColor = vec4(term + stars(d) * L.star * shield, 1.0);
-        return;
+    // ================= background UV: analytic far field (EVERY pixel) =======
+    // The analytic weak-deflection UV is the BASE for every pixel; the near field
+    // blends its geodesic UV on top (wn, below). The actual texture() fetch is
+    // DEFERRED to the end, in UNIFORM control flow -- so no quad fetches the
+    // background inside a divergent branch and NVIDIA's implicit LOD derivative
+    // stays defined. The old hard far/near branch had a texture() on EACH side: a
+    // quad straddling the handoff mixed two unrelated UVs -> garbage derivative ->
+    // the speckle ring. No branch wraps the fetch now, so there is no seam.
+    float u    = Z0 * inversesqrt(Z0 * Z0 + b * b);
+    float defl = (2.0 / (W * W)) / max(plen, 1e-4)
+               * (1.29 * u + 0.07) * max(LENS_DEPTH - 2.14 * u + 0.75, 0.0)
+               * window * shield;
+    vec2  dir  = p / max(plen, 1e-5);
+    // mild chromatic aberration near the handoff circle (per-channel UV split).
+    // ab is 0 for b <= bmax (smoothstep starts at b/bmax = 1), so the split exists
+    // ONLY in the far field where wn = 0 -> no aberration discontinuity at the seam.
+    float ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
+    vec2  suvFar[3];
+    for (int i = 0; i < 3; i++) {
+        float k   = 1.0 + (float(i) - 1.0) * ab;
+        vec2  sp  = p - dir * defl * k;
+        sp.x += WARP_LEAN * p.y * window * shield;  // lean (matches the near field)
+        sp += ripOff;                               // shake the fabric (matches the near field)
+        suvFar[i] = texSample(center + sp / vec2(aspect, 1.0));
     }
+    float bbf  = max(b, 1e-4);                       // floor so dFar is finite at the center
+    vec3  dFar = normalize(vec3(-(pr / bbf) * (2.0 / bbf), -1.0));
 
-    // ====================== near field: trace the geodesic ==================
-    // Parallel rays from a distant camera at +z. Hole at the origin, r_s = 1.
-    // Integrate x'' = -(3/2) h^2 x / r^5 (exact Schwarzschild photon bending).
-    vec3  x  = vec3(pr, Z0);
-    vec3  v  = vec3(0.0, 0.0, -1.0);
-    float h2 = dot(pr, pr);
+    // shared accumulators. Far-field defaults: no disk, transparent, escaped.
+    // suvNear / bgVisNear / dNear default to the far field so wn = 0 is an exact no-op.
+    vec3  emitc     = vec3(0.0);            // accumulated disk light (HDR)
+    float trans     = 1.0;                  // transmittance toward the background
+    bool  captured  = false;
+    vec2  suvNear   = suvFar[1];            // geodesic background UV
+    float bgVisNear = 1.0;                  // near background visibility (captured / past-90deg -> 0)
+    vec3  dNear     = dFar;
+    // wn: weight of the geodesic UV. 0 at/outside bmax, ramps to 1 a BAND inside it, so the
+    // geodesic UV is faded to the analytic UV BEFORE the handoff -> the blended UV is continuous.
+    float wn = smoothstep(bmax, bmax - BAND, b);
 
-    float ci = cos(L.incl), si = sin(L.incl);
-    vec3  n  = vec3(0.0, si, ci);           // disk-plane normal
-    vec3  e2 = vec3(0.0, ci, -si);          // in-plane axis completing (x, e2, n)
-    float sdir = L.speed < 0.0 ? -1.0 : 1.0;
-    float spd  = abs(L.speed);
+    if (b < bmax) {
+        // ====================== near field: trace the geodesic ==================
+        // Parallel rays from a distant camera at +z. Hole at the origin, r_s = 1.
+        // Integrate x'' = -(3/2) h^2 x / r^5 (exact Schwarzschild photon bending).
+        vec3  x  = vec3(pr, Z0);
+        vec3  v  = vec3(0.0, 0.0, -1.0);
+        float h2 = dot(pr, pr);
 
-    vec3  emitc = vec3(0.0);                // accumulated disk light (HDR)
-    float trans = 1.0;                      // transmittance toward the background
-    bool  captured = false;
-    float sPrev = dot(x, n);
-    vec3  xPrev = x;
+        float ci = cos(L.incl), si = sin(L.incl);
+        vec3  n  = vec3(0.0, si, ci);           // disk-plane normal
+        vec3  e2 = vec3(0.0, ci, -si);          // in-plane axis completing (x, e2, n)
+        float sdir = L.speed < 0.0 ? -1.0 : 1.0;
+        float spd  = abs(L.speed);
 
-    for (int i = 0; i < N_STEPS; i++) {
-        float r2 = dot(x, x);
-        if (r2 < 1.0) { captured = true; break; }   // through the horizon
-        if (x.z < -Z0 && v.z < 0.0) break;          // escaped out the back
-        if (r2 > 4.0 * Z0 * Z0) break;              // flung far sideways
-        float r  = sqrt(r2);
-        float dt = clamp(0.16 * r, 0.03, 1.5);
-        // leapfrog (kick-drift-kick) keeps near-critical orbits stable
-        vec3 a = -1.5 * h2 * x / (r2 * r2 * r);
-        v += a * (0.5 * dt);
-        x += v * dt;
-        r2 = dot(x, x);
-        r  = sqrt(r2);
-        a  = -1.5 * h2 * x / (r2 * r2 * r);
-        v += a * (0.5 * dt);
+        float sPrev = dot(x, n);
+        vec3  xPrev = x;
 
-        // ---- thin-disk crossing: the ray pierced the disk plane ----
-        float s = dot(x, n);
-        if (s * sPrev < 0.0 && trans > 0.02) {
-            float tc = sPrev / (sPrev - s);
-            vec3  xc = mix(xPrev, x, tc);
-            float rc = length(xc);
-            if (rc > rin && rc < rout) {
-                // disk ripple: a radial wave (same iRipple envelope as the fabric, but
-                // slower) wobbles the bright ring's radius in/out + pulses its brightness
-                float diskRip = iRipple * sin(rc * DISK_RIP_FREQ * iRipFreq - iRipPhase * DISK_RIP_SPEED);
-                float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
-                float band = smoothstep(rin, rin * 1.25, rcW)
-                           * (1.0 - smoothstep(rout * 0.70, rout, rcW));
+        for (int i = 0; i < N_STEPS; i++) {
+            float r2 = dot(x, x);
+            if (r2 < 1.0) { captured = true; break; }   // through the horizon
+            if (x.z < -Z0 && v.z < 0.0) break;          // escaped out the back
+            if (r2 > 4.0 * Z0 * Z0) break;              // flung far sideways
+            float r  = sqrt(r2);
+            float dt = clamp(0.16 * r, 0.03, 1.5);
+            // leapfrog (kick-drift-kick) keeps near-critical orbits stable
+            vec3 a = -1.5 * h2 * x / (r2 * r2 * r);
+            v += a * (0.5 * dt);
+            x += v * dt;
+            r2 = dot(x, x);
+            r  = sqrt(r2);
+            a  = -1.5 * h2 * x / (r2 * r2 * r);
+            v += a * (0.5 * dt);
 
-                float phi   = atan(dot(xc, e2), xc.x);
-                float turns = phi / 6.2831853;
-                float kep   = pow(rin / rc, 1.5);
-                float gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
-                // true Keplerian advection rate (inner orbits faster), signed
-                float rateS = kep * spd * gloc * dil * sdir;
-                // two copies advected by that rate but offset half a cycle; the
-                // crossfade weight is 0 at each copy's reset, hiding the renewal
-                float ph1   = fract(iDiskTime / DISK_CYCLE);
-                float ph2   = fract(iDiskTime / DISK_CYCLE + 0.5);
-                float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
-                float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
-                float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
-                // feeding drifts the streak pattern inward in radius -> matter spirals
-                // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
-                // (streaks follow the wobbled radius too, so the texture ripples with the ring)
-                float rcN   = rcW + iInflow * INFALL_K;
-                float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
-                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
-                float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
-                              vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
-                float streaks = mix(st2, st1, wx);
-                streaks = 0.35 + L.contr * streaks * streaks;
+            // ---- thin-disk crossing: the ray pierced the disk plane ----
+            float s = dot(x, n);
+            if (s * sPrev < 0.0 && trans > 0.02) {
+                float tc = sPrev / (sPrev - s);
+                vec3  xc = mix(xPrev, x, tc);
+                float rc = length(xc);
+                if (rc > rin && rc < rout) {
+                    // disk ripple: a radial wave (same iRipple envelope as the fabric, but
+                    // slower) wobbles the bright ring's radius in/out + pulses its brightness
+                    float diskRip = iRipple * sin(rc * DISK_RIP_FREQ * iRipFreq - iRipPhase * DISK_RIP_SPEED);
+                    float rcW   = rc - diskRip * DISK_RIP_SHIFT;   // visually wobbled radius (physics stays on rc)
+                    float band = smoothstep(rin, rin * 1.25, rcW)
+                               * (1.0 - smoothstep(rout * 0.70, rout, rcW));
 
-                // relativistic Doppler + gravitational shift
-                vec3  gasdir = normalize(cross(n, xc)) * sdir;
-                float beta   = clamp(inversesqrt(max(2.0 * (rc - 1.0), 0.2)), 0.0, 0.99);
-                float g      = gloc / max(1.0 + beta * dot(gasdir, normalize(v)), 0.05);
-                g = mix(1.0, g, L.dopp);
+                    float phi   = atan(dot(xc, e2), xc.x);
+                    float turns = phi / 6.2831853;
+                    float kep   = pow(rin / rc, 1.5);
+                    float gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
+                    // true Keplerian advection rate (inner orbits faster), signed
+                    float rateS = kep * spd * gloc * dil * sdir;
+                    // two copies advected by that rate but offset half a cycle; the
+                    // crossfade weight is 0 at each copy's reset, hiding the renewal
+                    float ph1   = fract(iDiskTime / DISK_CYCLE);
+                    float ph2   = fract(iDiskTime / DISK_CYCLE + 0.5);
+                    float wx    = 1.0 - abs(2.0 * ph1 - 1.0);
+                    float sw1   = rc * L.wind * 0.12 - rateS * ph1 * DISK_CYCLE;
+                    float sw2   = rc * L.wind * 0.12 - rateS * ph2 * DISK_CYCLE;
+                    // feeding drifts the streak pattern inward in radius -> matter spirals
+                    // into the shadow (procedural noise, so no seam/flicker). 0 when not fed.
+                    // (streaks follow the wobbled radius too, so the texture ripples with the ring)
+                    float rcN   = rcW + iInflow * INFALL_K;
+                    float st1   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw1 * 3.0), 19.0) * 0.65 +
+                                  vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw1 * 1.5 + 7.0), 9.0) * 0.35;
+                    float st2   = vnoiseWrapY(vec2(rcN * 2.8, turns * 19.0 + sw2 * 3.0), 19.0) * 0.65 +
+                                  vnoiseWrapY(vec2(rcN * 1.0, turns * 9.0  + sw2 * 1.5 + 7.0), 9.0) * 0.35;
+                    float streaks = mix(st2, st1, wx);
+                    streaks = 0.35 + L.contr * streaks * streaks;
 
-                float xpr   = max(1.0 - sqrt(rin / rc), 0.0);
-                float tprof = pow(rin / rc, 0.75) * pow(xpr, 0.25) / 0.488;
-                vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
-                float boost = pow(g, L.beam);
+                    // relativistic Doppler + gravitational shift
+                    vec3  gasdir = normalize(cross(n, xc)) * sdir;
+                    float beta   = clamp(inversesqrt(max(2.0 * (rc - 1.0), 0.2)), 0.0, 0.99);
+                    float g      = gloc / max(1.0 + beta * dot(gasdir, normalize(v)), 0.05);
+                    g = mix(1.0, g, L.dopp);
 
-                float density = band * streaks * max(0.0, 1.0 + diskRip * DISK_RIP_BRIGHT);
-                emitc += trans * cbb * (L.gain * 2.2 * density * tprof * tprof * boost);
-                trans *= 1.0 - clamp(L.opac * density, 0.0, 1.0);
+                    float xpr   = max(1.0 - sqrt(rin / rc), 0.0);
+                    float tprof = pow(rin / rc, 0.75) * pow(xpr, 0.25) / 0.488;
+                    vec3  cbb   = blackbody(L.temp * tprof * pow(g, DOPP_COLOR));
+                    float boost = pow(g, L.beam);
+
+                    float density = band * streaks * max(0.0, 1.0 + diskRip * DISK_RIP_BRIGHT);
+                    emitc += trans * cbb * (L.gain * 2.2 * density * tprof * tprof * boost);
+                    trans *= 1.0 - clamp(L.opac * density, 0.0, 1.0);
+                }
             }
+            sPrev = s;
+            xPrev = x;
         }
-        sPrev = s;
-        xPrev = x;
-    }
-    if (!captured && dot(x, x) < 4.0) captured = true;
+        if (!captured && dot(x, x) < 4.0) captured = true;
 
-    // ---- background: where did the escaped ray come from? ----
-    vec3 bg = vec3(0.0);
-    if (!captured) {
-        vec3 d = normalize(v);
-        bg += stars(d) * L.star * shield;
-        if (d.z < -0.05) {
-            // project the straight exit ray onto the lens plane at z = -LENS_DEPTH
-            float tpl = (-LENS_DEPTH - x.z) / d.z;
-            vec3  hp  = x + d * tpl;
-            vec2  q   = rot(hp.xy, -L.roll) / W;
-            vec2  sp  = vec2(q.x, -q.y);
-            // only the displacement is faded by window, never the color: no seam
-            vec2  samp = p + (sp - p) * window * shield;
-            // lean the warp so it isn't mirror-symmetric; same shear + window as
-            // the far field, so the two stay continuous across the handoff ring
-            samp.x += WARP_LEAN * p.y * window * shield;
-            samp += ripOff;                              // shake the fabric (matches the far field)
-            vec2  suv = texSample(center + samp / vec2(aspect, 1.0));
-            // rays bent past ~90deg never reach the plane; fade to the starfield
-            float toward = smoothstep(0.05, 0.35, -d.z);
-            bg += texture(iChannel0, suv).rgb * toward;
+        // ---- background: where did the escaped ray come from? ----
+        if (!captured) {
+            vec3 d = normalize(v);
+            dNear  = d;
+            if (d.z < -0.05) {
+                // project the straight exit ray onto the lens plane at z = -LENS_DEPTH
+                float tpl = (-LENS_DEPTH - x.z) / d.z;
+                vec3  hp  = x + d * tpl;
+                vec2  q   = rot(hp.xy, -L.roll) / W;
+                vec2  sp  = vec2(q.x, -q.y);
+                // only the displacement is faded by window, never the color: no seam
+                vec2  samp = p + (sp - p) * window * shield;
+                // lean the warp so it isn't mirror-symmetric; same shear + window as
+                // the far field, so the two stay continuous across the handoff
+                samp.x += WARP_LEAN * p.y * window * shield;
+                samp += ripOff;                              // shake the fabric (matches the far field)
+                suvNear   = texSample(center + samp / vec2(aspect, 1.0));
+                // rays bent past ~90deg never reach the plane; fade to the starfield
+                bgVisNear = smoothstep(0.05, 0.35, -d.z);
+            } else {
+                bgVisNear = 0.0;                             // bent past ~90deg: no plane hit
+            }
+        } else {
+            bgVisNear = 0.0;                                 // fell through the horizon: no background
         }
     }
+
+    // ============== unified background fetch (UNIFORM control flow) ==========
+    // ONE set of fetches for every pixel, so the fetch is never inside a divergent branch
+    // -> the auto-LOD derivative is DEFINED (no seam ring). Plain texture(), so mipmaps +
+    // anisotropic filtering are kept (full quality + zoom-out anti-shimmer). Three fetches keep the
+    // far-field per-channel chromatic split; in the near field the three UVs collapse to suvNear.
+    vec2  uvR  = mix(suvFar[0], suvNear, wn);
+    vec2  uvG  = mix(suvFar[1], suvNear, wn);
+    vec2  uvB  = mix(suvFar[2], suvNear, wn);
+    vec3 bgText;
+    bgText.r = texture(iChannel0, uvR).r;
+    bgText.g = texture(iChannel0, uvG).g;
+    bgText.b = texture(iChannel0, uvB).b;
+    float vis  = mix(1.0, bgVisNear, wn);        // far = 1, near = bgVisNear, blended in the band
+    vec3  star = mix(stars(dFar), stars(dNear), wn) * L.star * shield;
+    vec3  bg   = bgText * vis + star;
 
     // feeding brightens the disk (accretion flare); HDR, then tonemap over the bg
     emitc *= iFlare;
