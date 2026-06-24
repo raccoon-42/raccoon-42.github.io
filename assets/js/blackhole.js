@@ -167,6 +167,7 @@ void main() {
   // tap then a held second tap near it. firstTap* = the first tap; feedArmed = this touch is the held 2nd tap.
   let firstTapT = 0, firstTapX = 0, firstTapY = 0, feedArmed = false;
   const DOUBLE_TAP_MS = 320;                               // max gap between the two taps
+  const DOUBLE_TAP_MIN_MS = 60;                            // MIN gap: rejects a finger-bounce / double-contact (re-contact within ~30ms) being read as a deliberate double-tap -> false feed
   const DOUBLE_TAP_DIST = 44;                              // px: the 2nd tap (and a "tap" itself) must stay within this of the 1st
   const TAP_MAX_MS = 250;                                  // a release within this (and < DOUBLE_TAP_DIST move) counts as a tap, not a hold/drag/swipe
   let wobAge = 1e9, wobDX = 0, wobDY = 0, wobX = 0, wobY = 0, wobSwell = 0, wobRip = 0; // preset-change "drop" wobble (2D throw + size swell + fabric ripple)
@@ -507,9 +508,23 @@ void main() {
     window.addEventListener('touchend', syncTouches);
     window.addEventListener('touchcancel', syncTouches);
     document.addEventListener('mouseleave', onMouseLeave); // desktop: end the pull when the cursor leaves
-    // a long press is a feed gesture here, not a context menu / text selection;
+    // a long press / double-tap is a feed gesture here, not a context menu / text selection;
     // suppress the menu the browser would otherwise pop (Android especially)
     window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // claim scene-BACKGROUND touches at the source: the new double-tap-and-hold feed otherwise trips
+    // the browser's native double-tap/long-press (word-select, callout, "right click"). preventing
+    // touchstart kills those + the synthetic mouse events WITHOUT stopping pointer events, so the
+    // feed/pull/swipe/pinch gestures still fire. controls (links, the picker) are excluded so taps on
+    // them work normally. (CSS user-select/touch-callout/touch-action weren't enough on their own.)
+    window.addEventListener('touchstart', function (e) {
+      if (e.target.closest && e.target.closest('.bh-preset, a, button, select, input, textarea')) return;
+      e.preventDefault();
+    }, { passive: false });
+    // belt-and-suspenders for any browser that still starts a selection from the double-tap
+    window.addEventListener('selectstart', function (e) {
+      if (e.target.closest && e.target.closest('.bh-preset, input, textarea, select, [contenteditable]')) return;
+      e.preventDefault();
+    });
     window.addEventListener('keydown', onKeyDown); // desktop: arrow keys switch the black hole
     window.addEventListener('keyup', onKeyUp);     // stop held arrow-key zoom + persist
     window.addEventListener('blur', function () { // don't get stuck zooming/feeding if focus is lost mid-hold
@@ -858,6 +873,12 @@ void main() {
     // touch always uses the heavy spring; a mouse uses the slow hover-drift UNTIL the button
     // is held (dragging) -- then it grabs the hole with that same spring (momentum + coast).
     pullTouch = (e.pointerType !== 'mouse') || dragging;
+    // a moving touch is a DRAG, not a feed-hold: cancel an armed-but-not-yet-started feed so a
+    // tap-then-drag (or a stray tap before a grab) can't false-feed -> no surprise collapse on
+    // release. once the feed has actually started (pressed), keep it -> you can still feed + drag.
+    if (feedArmed && !pressed && Math.hypot(e.clientX - swX, e.clientY - swY) > DOUBLE_TAP_DIST) {
+      feedArmed = false; clearTimeout(touchFeedTimer);
+    }
   }
 
   // a second finger landed: add a pinch-zoom ON TOP of whatever the first finger was doing.
@@ -902,7 +923,8 @@ void main() {
     // FEED only on a double-tap-and-hold: arm feeding ONLY if this down is the 2nd tap of a quick
     // double-tap near the 1st. a lone touch just pulls/swipes (no feed). the held 2nd tap then feeds
     // (deferred so a 3rd-finger pinch can still cancel it). consume firstTapT so a 3rd tap needs a fresh 1st.
-    feedArmed = (e.timeStamp - firstTapT) < DOUBLE_TAP_MS &&
+    const tapGap = e.timeStamp - firstTapT;
+    feedArmed = tapGap > DOUBLE_TAP_MIN_MS && tapGap < DOUBLE_TAP_MS &&
                 Math.hypot(e.clientX - firstTapX, e.clientY - firstTapY) < DOUBLE_TAP_DIST;
     firstTapT = 0;
     clearTimeout(touchFeedTimer);
